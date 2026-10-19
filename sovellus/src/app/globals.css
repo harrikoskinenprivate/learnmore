@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+:root {
+  --paper: #f3efe6;
+  --card: #fffdf8;
+  --ink: #1c1915;
+  --muted: #5e584e;
+  --line: #e3d9c8;
+  --pine: #1e4d3a;
+  --pine-dark: #16392b;
+  --danger: #8c2f2f;
+  --danger-bg: #f8ecec;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-pine: var(--pine);
+  --color-pine-dark: var(--pine-dark);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --font-sans: var(--font-geist-sans);
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans), "Segoe UI", sans-serif;
+}
+
+input,
+textarea,
+button,
+summary {
+  outline-color: var(--pine);
+}

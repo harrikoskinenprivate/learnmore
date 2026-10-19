@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: oppimistehtavat
+      POSTGRES_PASSWORD: oppimistehtavat
+      POSTGRES_DB: oppimistehtavat
+    ports:
+      - "5432:5432"
+    volumes:
+      - oppimistehtavat-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oppimistehtavat -d oppimistehtavat"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  oppimistehtavat-pg:
