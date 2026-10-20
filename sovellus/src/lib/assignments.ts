@@ -2,7 +2,8 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { notFound } from "next/navigation";
 
 import { requireTeacher, requireUser } from "@/lib/auth";
@@ -22,6 +23,7 @@ import {
 import type {
   AssignmentMediaItem,
   FormState,
+  LinkedAssignment,
   ResponseKind,
   StoredResponse,
   StudentAssignmentDetail,
@@ -40,6 +42,7 @@ import {
 } from "@/lib/validation";
 
 const MAX_LINKS = 15;
+const parentAssignment = alias(assignments, "parent_assignment");
 
 function isResponseKind(value: string): value is ResponseKind {
   return value === "text" || value === "image" || value === "video";
@@ -68,8 +71,10 @@ export async function listTeacherDrafts(): Promise<TeacherDraftListItem[]> {
       title: assignments.title,
       createdAt: assignments.createdAt,
       deadline: assignments.deadline,
+      parentTitle: parentAssignment.title,
     })
     .from(assignments)
+    .leftJoin(parentAssignment, eq(parentAssignment.id, assignments.parentAssignmentId))
     .where(eq(assignments.status, "draft"))
     .orderBy(asc(assignments.createdAt));
 }
@@ -88,10 +93,12 @@ export async function listTeacherWork(): Promise<TeacherWorkItem[]> {
       studentName: users.name,
       returnedAt: assignmentStudents.returnedAt,
       reviewedAt: assignmentStudents.reviewedAt,
+      parentTitle: parentAssignment.title,
     })
     .from(assignmentStudents)
     .innerJoin(assignments, eq(assignments.id, assignmentStudents.assignmentId))
     .innerJoin(users, eq(users.id, assignmentStudents.studentId))
+    .leftJoin(parentAssignment, eq(parentAssignment.id, assignments.parentAssignmentId))
     .where(eq(assignments.status, "published"))
     .orderBy(asc(assignments.createdAt), asc(users.name));
 
@@ -116,9 +123,11 @@ export async function listStudentAssignments(): Promise<StudentAssignmentListIte
       deadline: assignments.deadline,
       returnedAt: assignmentStudents.returnedAt,
       reviewedAt: assignmentStudents.reviewedAt,
+      parentTitle: parentAssignment.title,
     })
     .from(assignmentStudents)
     .innerJoin(assignments, eq(assignments.id, assignmentStudents.assignmentId))
+    .leftJoin(parentAssignment, eq(parentAssignment.id, assignments.parentAssignmentId))
     .where(
       and(eq(assignmentStudents.studentId, user.id), eq(assignments.status, "published")),
     )
@@ -172,6 +181,7 @@ export async function getTeacherAssignment(id: string): Promise<TeacherAssignmen
       instructions: assignments.instructions,
       status: assignments.status,
       responseKind: assignments.responseKind,
+      parentAssignmentId: assignments.parentAssignmentId,
       deadline: assignments.deadline,
       createdAt: assignments.createdAt,
     })
@@ -239,9 +249,12 @@ export async function getTeacherAssignment(id: string): Promise<TeacherAssignmen
   const responseByStudent = new Map(responses.map((row) => [row.studentId, row]));
 
   const media = await listAssignmentMedia(id);
+  const context = await loadParentAndFeedback(id, assignment.parentAssignmentId);
 
   return {
     ...assignment,
+    parent: context.parent,
+    feedback: context.feedback,
     links,
     media,
     questions,
@@ -283,6 +296,7 @@ export async function getStudentAssignment(id: string): Promise<StudentAssignmen
       reviewedAt: assignmentStudents.reviewedAt,
       deadline: assignments.deadline,
       responseKind: assignments.responseKind,
+      parentAssignmentId: assignments.parentAssignmentId,
       id: assignments.id,
       title: assignments.title,
       instructions: assignments.instructions,
@@ -348,6 +362,7 @@ export async function getStudentAssignment(id: string): Promise<StudentAssignmen
       .limit(1),
   ]);
 
+  const context = await loadParentAndFeedback(id, assignment.parentAssignmentId, user.id);
   const answerByQuestion = new Map(saved.map((row) => [row.questionId, row.body]));
   const response: StoredResponse = {
     body: responseRows[0]?.body ?? "",
@@ -367,6 +382,8 @@ export async function getStudentAssignment(id: string): Promise<StudentAssignmen
     links,
     media,
     responseKind: assignment.responseKind,
+    parent: context.parent,
+    feedback: context.feedback,
     questions: questions.map((question) => ({
       ...question,
       answer: answerByQuestion.get(question.id) ?? "",
@@ -388,6 +405,7 @@ export async function createAssignment(input: {
   mediaIds: string[];
   deadline: string;
   publish: boolean;
+  parentAssignmentId?: string;
 }): Promise<FormState & { id?: string }> {
   const teacher = await requireTeacher();
 
@@ -450,6 +468,15 @@ export async function createAssignment(input: {
     return { error: "Valitse oppilaat uudelleen." };
   }
 
+  const parentAssignmentId = input.parentAssignmentId?.trim() ?? "";
+  const parentError = await feedbackStudentError(
+    parentAssignmentId,
+    input.publish ? studentIds : [],
+  );
+  if (parentError) {
+    return { error: parentError };
+  }
+
   let mediaIds: string[];
   try {
     mediaIds = await validateMediaSelection(teacher.id, input.mediaIds);
@@ -470,6 +497,7 @@ export async function createAssignment(input: {
       createdBy: teacher.id,
       status: input.publish ? "published" : "draft",
       responseKind,
+      parentAssignmentId: parentAssignmentId || null,
       deadline,
     });
 
@@ -836,7 +864,10 @@ export async function publishToStudents(input: {
   }
 
   const assignmentRows = await db
-    .select({ id: assignments.id })
+    .select({
+      id: assignments.id,
+      parentAssignmentId: assignments.parentAssignmentId,
+    })
     .from(assignments)
     .where(eq(assignments.id, input.assignmentId))
     .limit(1);
@@ -860,6 +891,14 @@ export async function publishToStudents(input: {
   const additions = studentIds.filter((id) => !existingIds.has(id));
   if (additions.length < 1) {
     return { error: "Valitut oppilaat ovat jo tehtävällä." };
+  }
+
+  const parentError = await feedbackStudentError(
+    assignmentRows[0].parentAssignmentId ?? "",
+    additions,
+  );
+  if (parentError) {
+    return { error: parentError };
   }
 
   await db.transaction(async (tx) => {
@@ -940,4 +979,128 @@ export async function reviewReturn(input: {
     );
 
   return { message: "Tehtävä tarkistettu." };
+}
+
+export async function getFeedbackTarget(parentId: string): Promise<{
+  id: string;
+  title: string;
+  students: { id: string; name: string }[];
+} | null> {
+  await requireTeacher();
+  if (!isUuid(parentId)) {
+    return null;
+  }
+
+  const rows = await db
+    .select({ id: assignments.id, title: assignments.title })
+    .from(assignments)
+    .where(eq(assignments.id, parentId))
+    .limit(1);
+  const parent = rows[0];
+  if (!parent) {
+    return null;
+  }
+
+  const students = await db
+    .select({ id: users.id, name: users.name })
+    .from(assignmentStudents)
+    .innerJoin(users, eq(users.id, assignmentStudents.studentId))
+    .where(
+      and(
+        eq(assignmentStudents.assignmentId, parentId),
+        isNotNull(assignmentStudents.returnedAt),
+      ),
+    )
+    .orderBy(asc(users.name));
+
+  return { ...parent, students };
+}
+
+async function loadParentAndFeedback(
+  assignmentId: string,
+  parentId: string | null,
+  studentId?: string,
+): Promise<{ parent: { id: string; title: string } | null; feedback: LinkedAssignment[] }> {
+  const parentRows = parentId
+    ? await db
+        .select({ id: assignments.id, title: assignments.title })
+        .from(assignments)
+        .where(eq(assignments.id, parentId))
+        .limit(1)
+    : [];
+
+  const feedback = studentId
+    ? await db
+        .select({
+          id: assignments.id,
+          title: assignments.title,
+          status: assignments.status,
+          createdAt: assignments.createdAt,
+        })
+        .from(assignments)
+        .innerJoin(
+          assignmentStudents,
+          and(
+            eq(assignmentStudents.assignmentId, assignments.id),
+            eq(assignmentStudents.studentId, studentId),
+          ),
+        )
+        .where(
+          and(
+            eq(assignments.parentAssignmentId, assignmentId),
+            eq(assignments.status, "published"),
+          ),
+        )
+        .orderBy(asc(assignments.createdAt))
+    : await db
+        .select({
+          id: assignments.id,
+          title: assignments.title,
+          status: assignments.status,
+          createdAt: assignments.createdAt,
+        })
+        .from(assignments)
+        .where(eq(assignments.parentAssignmentId, assignmentId))
+        .orderBy(asc(assignments.createdAt));
+
+  return { parent: parentRows[0] ?? null, feedback };
+}
+
+async function feedbackStudentError(
+  parentId: string,
+  studentIds: string[],
+): Promise<string | null> {
+  if (!parentId) {
+    return null;
+  }
+  if (!isUuid(parentId)) {
+    return "Tehtävää ei löydy.";
+  }
+
+  const parent = await db
+    .select({ id: assignments.id })
+    .from(assignments)
+    .where(eq(assignments.id, parentId))
+    .limit(1);
+  if (!parent[0]) {
+    return "Tehtävää ei löydy.";
+  }
+  if (studentIds.length === 0) {
+    return null;
+  }
+
+  const returned = await db
+    .select({ studentId: assignmentStudents.studentId })
+    .from(assignmentStudents)
+    .where(
+      and(
+        eq(assignmentStudents.assignmentId, parentId),
+        inArray(assignmentStudents.studentId, studentIds),
+        isNotNull(assignmentStudents.returnedAt),
+      ),
+    );
+  if (returned.length !== studentIds.length) {
+    return "Palaute voidaan antaa vain oppilaalle, joka on palauttanut tehtävän.";
+  }
+  return null;
 }

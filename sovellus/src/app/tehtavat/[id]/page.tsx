@@ -11,7 +11,7 @@ import { ResponseForm } from "@/components/response-form";
 import { ResponseView } from "@/components/response-view";
 import { ReviewReturnForm } from "@/components/review-return-form";
 import { responseKindLabel, teacherWorkLabel } from "@/lib/assignment-labels";
-import { getStudentAssignment, getTeacherAssignment } from "@/lib/assignments";
+import { getFeedbackTarget, getStudentAssignment, getTeacherAssignment } from "@/lib/assignments";
 import { requireUser } from "@/lib/auth";
 import { deadlineInputValue, formatDeadline } from "@/lib/deadline";
 import { listStudents } from "@/lib/students";
@@ -43,10 +43,12 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
       getTeacherAssignment(id),
       listStudents(),
     ]);
+    const audience = assignment.parent ? await getFeedbackTarget(assignment.parent.id) : null;
+    const pool = audience
+      ? audience.students
+      : students.map((student) => ({ id: student.id, name: student.name }));
     const assigned = new Set(assignment.students.map((student) => student.id));
-    const unassigned = students
-      .filter((student) => !assigned.has(student.id))
-      .map((student) => ({ id: student.id, name: student.name }));
+    const unassigned = pool.filter((student) => !assigned.has(student.id));
     return (
       <div className="grid gap-8">
         <AppHeader user={user} />
@@ -56,6 +58,14 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
               Tehtävät
             </Link>
             <h1 className="mt-2 text-2xl font-semibold tracking-tight">{assignment.title}</h1>
+            {assignment.parent ? (
+              <p className="mt-2">
+                Palaute tehtävään{" "}
+                <Link href={`/tehtavat/${assignment.parent.id}`} className="text-pine underline">
+                  {assignment.parent.title}
+                </Link>
+              </p>
+            ) : null}
             <p className="mt-1 text-sm text-muted">
               {assignment.status === "draft" ? "Luonnos" : "Julkaistu"} ·{" "}
               {formatFiDate(assignment.createdAt)}
@@ -137,9 +147,17 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
                         ))}
                       </ol>
                     ) : null}
-                    {student.returnedAt && !student.reviewedAt ? (
-                      <div className="mt-3">
-                        <ReviewReturnForm assignmentId={assignment.id} studentId={student.id} />
+                    {student.returnedAt ? (
+                      <div className="mt-3 flex flex-wrap items-center gap-3">
+                        {!student.reviewedAt ? (
+                          <ReviewReturnForm assignmentId={assignment.id} studentId={student.id} />
+                        ) : null}
+                        <Link
+                          href={`/tehtavat/uusi?palautteena=${assignment.id}&oppilas=${student.id}`}
+                          className="inline-flex h-11 items-center rounded-md border border-pine px-4 text-base font-medium text-pine hover:bg-pine hover:text-white"
+                        >
+                          Anna palaute
+                        </Link>
                       </div>
                     ) : null}
                   </li>
@@ -157,6 +175,24 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
               />
             </div>
           </section>
+          {assignment.feedback.length > 0 ? (
+            <section className="grid gap-3">
+              <h2 className="text-xl font-semibold">Palautteet</h2>
+              <ul className="grid gap-2">
+                {assignment.feedback.map((item) => (
+                  <li key={item.id}>
+                    <Link href={`/tehtavat/${item.id}`} className="text-pine underline">
+                      {item.title}
+                    </Link>
+                    <span className="text-sm text-muted">
+                      {" "}
+                      · {item.status === "draft" ? "Luonnos" : "Julkaistu"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
         </article>
       </div>
     );
@@ -172,6 +208,14 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
             Tehtävät
           </Link>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight">{assignment.title}</h1>
+          {assignment.parent ? (
+            <p className="mt-2">
+              Palaute tehtävään{" "}
+              <Link href={`/tehtavat/${assignment.parent.id}`} className="text-pine underline">
+                {assignment.parent.title}
+              </Link>
+            </p>
+          ) : null}
           <p className="mt-1 text-sm text-muted">
             {assignment.returnedAt
               ? assignment.reviewedAt
@@ -248,6 +292,20 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
             <DraftForm assignmentId={assignment.id} questions={assignment.questions} />
           ) : null}
         </section>
+        {assignment.feedback.length > 0 ? (
+          <section className="grid gap-2">
+            <h2 className="text-xl font-semibold">Palautteet</h2>
+            <ul className="grid gap-2">
+              {assignment.feedback.map((item) => (
+                <li key={item.id}>
+                  <Link href={`/tehtavat/${item.id}`} className="text-pine underline">
+                    {item.title}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
       </article>
     </div>
   );

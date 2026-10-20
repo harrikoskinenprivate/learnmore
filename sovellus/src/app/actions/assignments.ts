@@ -35,6 +35,7 @@ export async function addAssignment(
     mediaIds: formData.getAll("mediaId").map((value) => String(value)),
     deadline: String(formData.get("deadline") ?? ""),
     publish: formData.get("intent") === "publish",
+    parentAssignmentId: String(formData.get("parentAssignmentId") ?? ""),
   });
 
   if (result.error || !result.id) {

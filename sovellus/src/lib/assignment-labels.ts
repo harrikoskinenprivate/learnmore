@@ -1,3 +1,10 @@
+export function withFeedback(parentTitle: string | null, meta: string): string {
+  if (!parentTitle) {
+    return meta;
+  }
+  return `Palaute tehtävään ${parentTitle} · ${meta}`;
+}
+
 export function responseKindLabel(kind: "text" | "image" | "video"): string {
   if (kind === "text") {
     return "Tekstikenttä";

@@ -12,15 +12,19 @@ type LinkRow = { title: string; url: string };
 
 export function CreateAssignmentForm({
   students,
+  parent,
+  initialSelected = [],
 }: {
   students: { id: string; name: string }[];
+  parent?: { id: string; title: string };
+  initialSelected?: string[];
 }) {
   const [state, action, pending] = useActionState(addAssignment, initialState);
   const [title, setTitle] = useState("");
   const [instructions, setInstructions] = useState("");
   const [links, setLinks] = useState<LinkRow[]>([{ title: "", url: "" }]);
   const [responseKind, setResponseKind] = useState<"text" | "image" | "video">("text");
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>(initialSelected);
   const [deadline, setDeadline] = useState("");
   const [mediaBusy, setMediaBusy] = useState(false);
 
@@ -34,6 +38,7 @@ export function CreateAssignmentForm({
 
   return (
     <form action={action} className="grid gap-6">
+      {parent ? <input type="hidden" name="parentAssignmentId" value={parent.id} /> : null}
       <div className="grid gap-1.5">
         <label htmlFor="title" className="text-sm font-medium">
           Otsikko
@@ -159,10 +164,14 @@ export function CreateAssignmentForm({
       <fieldset className="grid gap-2">
         <legend className="text-sm font-medium">Oppilaat</legend>
         <p className="text-sm text-muted">
-          Luonnos ei näy oppilaille. Julkaisu antaa tehtävän valituille, ja saman tehtävän voi myöhemmin julkaista muille.
+          {parent
+            ? `Palaute linkittyy tehtävään ${parent.title}. Luonnos ei näy oppilaalle. Julkaisu onnistuu vain, jos oppilas on palauttanut tehtävän.`
+            : "Luonnos ei näy oppilaille. Julkaisu antaa tehtävän valituille, ja saman tehtävän voi myöhemmin julkaista muille."}
         </p>
         {students.length === 0 ? (
-          <p className="text-sm text-muted">Lisää ensin oppilas.</p>
+          <p className="text-sm text-muted">
+            {parent ? "Oppilas ei ole vielä palauttanut tehtävää." : "Lisää ensin oppilas."}
+          </p>
         ) : (
           students.map((student) => (
             <label key={student.id} className="flex min-h-11 items-center gap-3">

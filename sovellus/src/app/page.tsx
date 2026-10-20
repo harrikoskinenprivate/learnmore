@@ -5,7 +5,7 @@ import { AppHeader } from "@/components/app-header";
 import { AssignmentCards } from "@/components/assignment-cards";
 import { LearningCardView } from "@/components/learning-card";
 import { AddStudentForm } from "@/components/student-forms";
-import { studentTaskLabel } from "@/lib/assignment-labels";
+import { studentTaskLabel, withFeedback } from "@/lib/assignment-labels";
 import { listStudentAssignments } from "@/lib/assignments";
 import { formatDeadline } from "@/lib/deadline";
 import { requireUser } from "@/lib/auth";
@@ -69,7 +69,10 @@ function StudentHome({
             .map((item) => ({
               id: item.id,
               title: item.title,
-              meta: `${studentTaskLabel(item)}${item.deadline ? ` · Määräaika ${formatDeadline(item.deadline)}` : ""}`,
+              meta: withFeedback(
+                item.parentTitle,
+                `${studentTaskLabel(item)}${item.deadline ? ` · Määräaika ${formatDeadline(item.deadline)}` : ""}`,
+              ),
             }))}
         />
       </section>
@@ -82,7 +85,10 @@ function StudentHome({
             .map((item) => ({
               id: item.id,
               title: item.title,
-              meta: `${studentTaskLabel(item)}${item.deadline ? ` · Määräaika ${formatDeadline(item.deadline)}` : ""}`,
+              meta: withFeedback(
+                item.parentTitle,
+                `${studentTaskLabel(item)}${item.deadline ? ` · Määräaika ${formatDeadline(item.deadline)}` : ""}`,
+              ),
             }))}
         />
       </section>

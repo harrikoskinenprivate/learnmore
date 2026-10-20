@@ -46,11 +46,19 @@ export type StoredResponse = {
   media: AssignmentMediaItem | null;
 };
 
+export type LinkedAssignment = {
+  id: string;
+  title: string;
+  status: AssignmentStatus;
+  createdAt: Date;
+};
+
 export type TeacherDraftListItem = {
   id: string;
   title: string;
   createdAt: Date;
   deadline: Date | null;
+  parentTitle: string | null;
 };
 
 export type TeacherWorkItem = {
@@ -63,6 +71,7 @@ export type TeacherWorkItem = {
   returnedAt: Date | null;
   reviewedAt: Date | null;
   late: boolean;
+  parentTitle: string | null;
 };
 
 export type StudentAssignmentListItem = {
@@ -74,6 +83,7 @@ export type StudentAssignmentListItem = {
   returnedAt: Date | null;
   reviewedAt: Date | null;
   late: boolean;
+  parentTitle: string | null;
 };
 
 export type MediaKind = "image" | "video";
@@ -100,6 +110,8 @@ export type TeacherAssignmentDetail = {
   links: AssignmentLinkItem[];
   media: AssignmentMediaItem[];
   responseKind: ResponseKind | null;
+  parent: { id: string; title: string } | null;
+  feedback: LinkedAssignment[];
   questions: { id: string; prompt: string }[];
   students: {
     id: string;
@@ -120,6 +132,8 @@ export type StudentAssignmentDetail = {
   links: AssignmentLinkItem[];
   media: AssignmentMediaItem[];
   responseKind: ResponseKind | null;
+  parent: { id: string; title: string } | null;
+  feedback: LinkedAssignment[];
   questions: { id: string; prompt: string; answer: string }[];
   response: StoredResponse;
   hasDraft: boolean;

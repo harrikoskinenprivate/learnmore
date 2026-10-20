@@ -1,5 +1,9 @@
 # Muutosloki
 
+## 20.10.2026
+
+Opettaja voi avata palautetusta tehtävästä uuden palautteen. Palaute on oma tehtävä, joka linkittyy aiempaan, ja niitä voi olla useita. Sen voi julkaista vain oppilaalle, joka on palauttanut aiemman tehtävän. Oppilas näkee palautteen omissa listoissaan ja palauttaa sen samalla tavalla. Migraatio on `sovellus/drizzle/0008_assignment_feedback.sql`.
+
 ## 19.10.2026
 
 Opettaja avaa oppilaan profiilin listasta ja täyttää oppijakortin. Kortissa on taso, vahvuudet, kehityskohteet ja tavoitteet, yksi rivi per oppilas. Oppilas näkee kortin etusivulla eikä voi muokata sitä.

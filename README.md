@@ -1,17 +1,17 @@
 # Oppimistehtävät
 
 Luotu: 12.10.2026
-Viimeksi päivitetty: 19.10.2026
+Viimeksi päivitetty: 20.10.2026
 
 Kansiossa on tehtäväohjelma ja erillinen englannin tasotesti.
 
 ## Tehtäväohjelma
 
-Selainohjelma, jolla yksi opettaja antaa tehtäviä oppilailleen. Sovellus on kansiossa `sovellus/`. Opettaja hallitsee oppilaita ja luo tehtäviä luonnoksena. Luonnos julkaistaan valituille oppilaille, ja sama tehtävä voidaan myöhemmin julkaista muille. Tehtävällä voi olla määräaika. Määräajan jälkeen oppilas voi yhä vastata, mutta tehtävä näkyy myöhässä. Uudessa tehtävässä oppilas palauttaa joko tekstin, yhden kuvan tai yhden videon. Teksti tallentuu automaattisesti. Opettaja merkitsee palautuksen tarkistetuksi. Aiemmat monikysymystehtävät jäävät luettaviksi. Listat jakautuvat kesken oleviin ja tehtyihin, vanhin ensin, ja opettajalla myös oppilaittain.
+Selainohjelma, jolla yksi opettaja antaa tehtäviä oppilailleen. Sovellus on kansiossa `sovellus/`. Opettaja hallitsee oppilaita ja luo tehtäviä luonnoksena. Luonnos julkaistaan valituille oppilaille, ja sama tehtävä voidaan myöhemmin julkaista muille. Tehtävällä voi olla määräaika. Määräajan jälkeen oppilas voi yhä vastata, mutta tehtävä näkyy myöhässä. Uudessa tehtävässä oppilas palauttaa joko tekstin, yhden kuvan tai yhden videon. Teksti tallentuu automaattisesti. Opettaja merkitsee palautuksen tarkistetuksi ja voi avata siihen liittyvän palautteen uutena tehtävänä. Palautteita voi olla useita, ja oppilas palauttaa ne samalla tavalla. Aiemmat monikysymystehtävät jäävät luettaviksi. Listat jakautuvat kesken oleviin ja tehtyihin, vanhin ensin, ja opettajalla myös oppilaittain.
 
 Opettaja lisää oppilaan nimellä ja sähköpostilla. Oppilas ei kirjaudu salasanalla: opettaja saa avainlinkin, jonka avaaminen avaa oppilaan omat tiedot. Linkki näytetään vain luontihetkellä. Uusi linkki sulkee vanhan ja oppilaan avoimet istunnot. Opettaja kirjautuu edelleen sähköpostilla ja salasanalla. Oppilaslistan rivi avaa profiilin, jossa opettaja luo linkin, poistaa oppilaan ja täyttää oppijakortin. Kortissa on taso, vahvuudet, kehityskohteet ja tavoitteet, yksi kortti per oppilas. Oppilas näkee kortin etusivulla eikä voi muokata sitä. Tehtävässä on otsikko, ohjeteksti, valinnaisia kuvia, yksi valinnainen ohjevideo ja linkkejä dokumentteihin (vain otsikko ja osoite). Ohjevideon voi kuvata selaimessa tai ladata tiedostona. Oppilaan palautus on tekstikenttä, kuva tai video. Videon voi kuvata puhelimen kameralla tai ladata tiedostona. Oppilas ei näe toisten oppilaiden tietoja. Opettajan salasana ja oppilaan avain tallennetaan tiivisteinä. Istunto on evästeessä.
 
-Paikallinen kokeilu käyttää Next.js:ää ja PostgreSQL:ää. Kuvat ja videot tallentuvat koneelle kansioon `sovellus/data/media`, kun `MEDIA_STORE=local`. Tuotannossa sama polku käyttää yksityistä Cloud Storage -bucketia alueella `europe-north1`. Bucket luodaan erikseen komennolla `./scripts/deploy-infra.sh bucket`. Ohjelmaversion julkaisu ei luo bucketia eikä kirjoita sen muuttujia. Opettajan palaute alitehtävänä, pisteet ja kirjallinen kommentti tulevat myöhemmin.
+Paikallinen kokeilu käyttää Next.js:ää ja PostgreSQL:ää. Kuvat ja videot tallentuvat koneelle kansioon `sovellus/data/media`, kun `MEDIA_STORE=local`. Tuotannossa sama polku käyttää yksityistä Cloud Storage -bucketia alueella `europe-north1`. Bucket luodaan erikseen komennolla `./scripts/deploy-infra.sh bucket`. Ohjelmaversion julkaisu ei luo bucketia eikä kirjoita sen muuttujia. Ilmoitukset, pisteet ja kirjallinen kommentti tulevat myöhemmin.
 
 Uusi ohjelmaversio ja palvelun asetukset julkaistaan erikseen. `scripts/deploy-hosting.sh` päivittää vain Cloud Run -kontin. Tietokanta, migraatiot, ympäristömuuttujat ja Secret Manager -secretit päivitetään komennolla `scripts/deploy-infra.sh`, ja vain silloin kun niitä muutetaan. Järjestys ja rajaukset ovat `TECHNICALGUIDE.md`-tiedostossa.
 

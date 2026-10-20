@@ -3,7 +3,7 @@ import Link from "next/link";
 
 import { AppHeader } from "@/components/app-header";
 import { AssignmentCards } from "@/components/assignment-cards";
-import { studentTaskLabel, teacherWorkLabel } from "@/lib/assignment-labels";
+import { studentTaskLabel, teacherWorkLabel, withFeedback } from "@/lib/assignment-labels";
 import { listStudentAssignments, listTeacherDrafts, listTeacherWork } from "@/lib/assignments";
 import { requireUser } from "@/lib/auth";
 import { formatDeadline } from "@/lib/deadline";
@@ -25,12 +25,12 @@ export default function AssignmentsPage() {
 
 function studentMeta(item: StudentAssignmentListItem): string {
   const deadline = item.deadline ? ` · Määräaika ${formatDeadline(item.deadline)}` : "";
-  return `${studentTaskLabel(item)}${deadline}`;
+  return withFeedback(item.parentTitle, `${studentTaskLabel(item)}${deadline}`);
 }
 
 function workMeta(item: TeacherWorkItem): string {
   const deadline = item.deadline ? ` · Määräaika ${formatDeadline(item.deadline)}` : "";
-  return `${item.studentName} · ${teacherWorkLabel(item)}${deadline}`;
+  return withFeedback(item.parentTitle, `${item.studentName} · ${teacherWorkLabel(item)}${deadline}`);
 }
 
 function workCards(items: TeacherWorkItem[], includeStudent = true) {
@@ -40,7 +40,10 @@ function workCards(items: TeacherWorkItem[], includeStudent = true) {
     title: item.title,
     meta: includeStudent
       ? workMeta(item)
-      : `${teacherWorkLabel(item)}${item.deadline ? ` · Määräaika ${formatDeadline(item.deadline)}` : ""}`,
+      : withFeedback(
+          item.parentTitle,
+          `${teacherWorkLabel(item)}${item.deadline ? ` · Määräaika ${formatDeadline(item.deadline)}` : ""}`,
+        ),
   }));
 }
 
@@ -115,7 +118,10 @@ async function Assignments() {
           items={drafts.map((item) => ({
             id: item.id,
             title: item.title,
-            meta: item.deadline ? `Määräaika ${formatDeadline(item.deadline)}` : "Ei määräaikaa",
+            meta: withFeedback(
+              item.parentTitle,
+              item.deadline ? `Määräaika ${formatDeadline(item.deadline)}` : "Ei määräaikaa",
+            ),
           }))}
         />
       </section>

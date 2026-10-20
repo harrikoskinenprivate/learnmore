@@ -1,5 +1,6 @@
 import {
   index,
+  type AnyPgColumn,
   integer,
   pgEnum,
   pgTable,
@@ -62,9 +63,14 @@ export const assignments = pgTable("assignments", {
     .references(() => users.id),
   status: assignmentStatus("status").notNull().default("draft"),
   responseKind: responseKind("response_kind"),
+  parentAssignmentId: uuid("parent_assignment_id").references((): AnyPgColumn => assignments.id, {
+    onDelete: "cascade",
+  }),
   deadline: timestamp("deadline", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("assignments_parent_assignment_id_idx").on(table.parentAssignmentId),
+]);
 
 export const assignmentLinks = pgTable(
   "assignment_links",
