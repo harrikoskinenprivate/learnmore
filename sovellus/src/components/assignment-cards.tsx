@@ -4,7 +4,7 @@ export function AssignmentCards({
   items,
   empty,
 }: {
-  items: { id: string; title: string; meta: string; href?: string }[];
+  items: { id: string; title: string; meta: string; href?: string; late?: boolean }[];
   empty: string;
 }) {
   if (items.length === 0) {
@@ -18,11 +18,20 @@ export function AssignmentCards({
   return (
     <ul className="grid gap-3">
       {items.map((item) => (
-        <li key={item.id} className="rounded-lg border border-line bg-card p-4">
+        <li
+          key={item.id}
+          className={
+            item.late
+              ? "rounded-lg border border-danger bg-danger-bg p-4"
+              : "rounded-lg border border-line bg-card p-4"
+          }
+        >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-lg font-medium">{item.title}</p>
-              <p className="text-sm text-muted">{item.meta}</p>
+              <p className={item.late ? "text-sm font-medium text-danger" : "text-sm text-muted"}>
+                {item.meta}
+              </p>
             </div>
             <Link
               href={item.href ?? `/tehtavat/${item.id}`}

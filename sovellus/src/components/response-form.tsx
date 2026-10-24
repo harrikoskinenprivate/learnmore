@@ -151,29 +151,41 @@ function MediaResponse({
   initialMedia,
 }: {
   assignmentId: string;
-  kind: "image" | "video";
+  kind: "image" | "video" | "audio";
   initialMedia: AssignmentMediaItem | null;
 }) {
   const [media, setMedia] = useState(initialMedia);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [recording, setRecording] = useState(false);
   const [returnState, returnAction, returning] = useActionState(
     saveAssignmentDraft,
     initialState,
   );
   const cameraRef = useRef<HTMLInputElement>(null);
 
-  async function send(file: File) {
+  async function send(file: File, source: "record" | "file" = "file") {
     setBusy(true);
     setError("");
     setStatus("Lähetetään…");
     try {
+      let prepared = file;
       if (kind === "video") {
-        await assertDuration(file);
+        await assertMediaDuration(file, "video");
       }
-      const id = await uploadResponse(assignmentId, kind, file);
-      setMedia({ id, kind, mime: file.type.split(";")[0]?.trim().toLowerCase() ?? "" });
+      if (kind === "audio") {
+        prepared = normalizeAudioFile(file);
+        if (source === "file") {
+          await assertMediaDuration(prepared, "audio");
+        }
+      }
+      const id = await uploadResponse(assignmentId, kind, prepared);
+      setMedia({
+        id,
+        kind,
+        mime: prepared.type.split(";")[0]?.trim().toLowerCase() ?? "",
+      });
       setStatus("Tiedosto tallennettu.");
     } catch (caught) {
       setStatus("");
@@ -195,11 +207,7 @@ function MediaResponse({
   return (
     <form action={returnAction} className="grid gap-4">
       <input type="hidden" name="assignmentId" value={assignmentId} />
-      <p className="text-sm text-muted">
-        {kind === "image"
-          ? "Yksi kuva, jpeg, png tai webp, enintään 8 Mt. Uusi kuva korvaa edellisen."
-          : "Yksi video, mp4 tai webm, enintään 3 minuuttia ja 150 Mt. Puhelimessa Kuvaa video avaa kameran. Tietokoneella valitaan tallennettu tiedosto. Uusi video korvaa edellisen."}
-      </p>
+      <p className="text-sm text-muted">{mediaHint(kind)}</p>
       {media ? <ResponseMedia kind={kind} media={media} /> : null}
       {kind === "image" ? (
         <div className="flex flex-wrap gap-2">
@@ -228,7 +236,7 @@ function MediaResponse({
             onChange={takeFile}
           />
         </div>
-      ) : (
+      ) : kind === "video" ? (
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -255,6 +263,14 @@ function MediaResponse({
             onChange={takeFile}
           />
         </div>
+      ) : (
+        <AudioControls
+          disabled={busy}
+          onRecordingChange={setRecording}
+          onFile={(file, source) => {
+            void send(file, source);
+          }}
+        />
       )}
       {error ? (
         <p role="alert" className="text-sm text-danger">
@@ -272,7 +288,7 @@ function MediaResponse({
         type="submit"
         name="intent"
         value="return"
-        disabled={returning || busy || !media}
+        disabled={returning || busy || recording || !media}
         className="h-11 justify-self-start rounded-md bg-pine px-4 text-base font-medium text-white hover:bg-pine-dark disabled:opacity-60"
       >
         {returning ? "Tallennetaan…" : "Palauta"}
@@ -281,9 +297,227 @@ function MediaResponse({
   );
 }
 
+function mediaHint(kind: "image" | "video" | "audio"): string {
+  if (kind === "image") {
+    return "Yksi kuva, jpeg, png tai webp, enintään 8 Mt. Uusi kuva korvaa edellisen.";
+  }
+  if (kind === "video") {
+    return "Yksi video, mp4 tai webm, enintään 3 minuuttia ja 150 Mt. Puhelimessa Kuvaa video avaa kameran. Tietokoneella valitaan tallennettu tiedosto. Uusi video korvaa edellisen.";
+  }
+  return "Yksi äänite, webm, mp4, mpeg, aac tai wav, enintään 3 minuuttia ja 25 Mt. Äänitä pyytää puhelimelta mikrofonin. Valitse tiedosto käyttää jo tallennettua äänitettä. Uusi äänite korvaa edellisen.";
+}
+
+function AudioControls({
+  disabled,
+  onRecordingChange,
+  onFile,
+}: {
+  disabled: boolean;
+  onRecordingChange: (recording: boolean) => void;
+  onFile: (file: File, source: "record" | "file") => void;
+}) {
+  const [recording, setRecording] = useState(false);
+  const [preparing, setPreparing] = useState(false);
+  const [error, setError] = useState("");
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const stopTimerRef = useRef<number | null>(null);
+  const preparingRef = useRef(false);
+  const aliveRef = useRef(true);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      if (stopTimerRef.current !== null) {
+        window.clearTimeout(stopTimerRef.current);
+      }
+      const recorder = recorderRef.current;
+      recorderRef.current = null;
+      if (recorder && recorder.state === "recording") {
+        recorder.onstop = null;
+        recorder.stop();
+      }
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  function stopStream() {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+  }
+
+  function setRecordingState(next: boolean) {
+    setRecording(next);
+    onRecordingChange(next);
+  }
+
+  async function start() {
+    setError("");
+    if (preparingRef.current || recorderRef.current) {
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setError("Tämä selain ei voi äänittää. Valitse tallennettu tiedosto.");
+      return;
+    }
+    preparingRef.current = true;
+    setPreparing(true);
+    onRecordingChange(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!aliveRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      streamRef.current = stream;
+      const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((item) =>
+        MediaRecorder.isTypeSupported(item),
+      );
+      const recorder = mime
+        ? new MediaRecorder(stream, { mimeType: mime })
+        : new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+      recorder.onstop = () => {
+        if (stopTimerRef.current !== null) {
+          window.clearTimeout(stopTimerRef.current);
+          stopTimerRef.current = null;
+        }
+        const type =
+          (recorder.mimeType || mime || "audio/webm").split(";")[0]?.trim().toLowerCase() ||
+          "audio/webm";
+        stopStream();
+        recorderRef.current = null;
+        setRecordingState(false);
+        if (chunks.length === 0) {
+          setError("Äänite on tyhjä.");
+          return;
+        }
+        const extension = type === "audio/mp4" ? "m4a" : "webm";
+        onFile(new File(chunks, `aanite.${extension}`, { type }), "record");
+      };
+      recorderRef.current = recorder;
+      preparingRef.current = false;
+      setPreparing(false);
+      setRecordingState(true);
+      recorder.start();
+      stopTimerRef.current = window.setTimeout(() => {
+        if (recorder.state === "recording") {
+          recorder.stop();
+        }
+      }, MAX_VIDEO_SECONDS * 1000);
+    } catch {
+      stopStream();
+      recorderRef.current = null;
+      preparingRef.current = false;
+      setPreparing(false);
+      setRecordingState(false);
+      setError("Mikrofonia ei saatu käyttöön.");
+    }
+  }
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex flex-wrap gap-2">
+        {recording ? (
+          <button
+            type="button"
+            className="h-11 rounded-md border border-line bg-card px-4 text-base"
+            onClick={() => recorderRef.current?.stop()}
+          >
+            Lopeta
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={disabled || preparing}
+            className="h-11 rounded-md border border-line bg-card px-4 text-base disabled:opacity-60"
+            onClick={() => {
+              void start();
+            }}
+          >
+            Äänitä
+          </button>
+        )}
+        <label
+          className={`inline-flex h-11 items-center rounded-md border border-line bg-card px-4 text-base ${
+            disabled || preparing || recording ? "pointer-events-none opacity-60" : "cursor-pointer"
+          }`}
+        >
+          Valitse tiedosto
+          <input
+            type="file"
+            accept="audio/webm,audio/mp4,audio/mpeg,audio/aac,audio/wav,audio/x-m4a,.m4a,.mp3,.aac,.wav,.webm"
+            disabled={disabled || preparing || recording}
+            className="sr-only"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (!file) {
+                return;
+              }
+              onFile(file, "file");
+            }}
+          />
+        </label>
+      </div>
+      {recording ? (
+        <p className="text-sm text-muted">Äänitetään. Tallennus päättyy 3 minuutissa.</p>
+      ) : null}
+      {error ? (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+const AUDIO_EXTENSIONS: Record<string, string> = {
+  webm: "audio/webm",
+  mp4: "audio/mp4",
+  m4a: "audio/mp4",
+  mp3: "audio/mpeg",
+  aac: "audio/aac",
+  wav: "audio/wav",
+};
+
+function normalizeAudioFile(file: File): File {
+  const raw = file.type.split(";")[0]?.trim().toLowerCase() ?? "";
+  const mapped =
+    raw === "audio/x-m4a" || raw === "audio/m4a"
+      ? "audio/mp4"
+      : raw === "audio/x-wav" || raw === "audio/wave"
+        ? "audio/wav"
+        : raw;
+  if (
+    mapped === "audio/webm" ||
+    mapped === "audio/mp4" ||
+    mapped === "audio/mpeg" ||
+    mapped === "audio/aac" ||
+    mapped === "audio/wav"
+  ) {
+    if (mapped === file.type) {
+      return file;
+    }
+    return new File([file], file.name || "aanite", { type: mapped });
+  }
+  const extension = file.name.toLowerCase().split(".").pop() ?? "";
+  const inferred = AUDIO_EXTENSIONS[extension];
+  if (!inferred) {
+    return file;
+  }
+  return new File([file], file.name || "aanite", { type: inferred });
+}
+
 async function uploadResponse(
   assignmentId: string,
-  kind: "image" | "video",
+  kind: "image" | "video" | "audio",
   file: File,
 ): Promise<string> {
   const mime = file.type.split(";")[0]?.trim().toLowerCase() ?? "";
@@ -320,10 +554,16 @@ async function uploadResponse(
   return created.id;
 }
 
-function assertDuration(file: File): Promise<void> {
+function assertMediaDuration(file: File, kind: "video" | "audio"): Promise<void> {
+  const tooLong =
+    kind === "audio"
+      ? "Äänite saa olla enintään 3 minuuttia."
+      : "Video saa olla enintään 3 minuuttia.";
+  const unreadable =
+    kind === "audio" ? "Äänitteen kestoa ei voitu lukea." : "Videon kestoa ei voitu lukea.";
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
-    const video = document.createElement("video");
+    const media = document.createElement(kind === "audio" ? "audio" : "video");
     let settled = false;
     const finish = (duration: number) => {
       if (settled) {
@@ -332,32 +572,32 @@ function assertDuration(file: File): Promise<void> {
       settled = true;
       URL.revokeObjectURL(url);
       if (!Number.isFinite(duration) || duration <= 0 || duration > MAX_VIDEO_SECONDS) {
-        reject(new Error("Video saa olla enintään 3 minuuttia."));
+        reject(new Error(tooLong));
         return;
       }
       resolve();
     };
-    video.preload = "metadata";
-    video.onloadedmetadata = () => {
-      if (Number.isFinite(video.duration)) {
-        finish(video.duration);
+    media.preload = "metadata";
+    media.onloadedmetadata = () => {
+      if (Number.isFinite(media.duration)) {
+        finish(media.duration);
         return;
       }
-      video.currentTime = Number.MAX_SAFE_INTEGER;
+      media.currentTime = Number.MAX_SAFE_INTEGER;
     };
-    video.ontimeupdate = () => {
-      if (Number.isFinite(video.duration)) {
-        finish(video.duration);
+    media.ontimeupdate = () => {
+      if (Number.isFinite(media.duration)) {
+        finish(media.duration);
       }
     };
-    video.onerror = () => {
+    media.onerror = () => {
       if (settled) {
         return;
       }
       settled = true;
       URL.revokeObjectURL(url);
-      reject(new Error("Videon kestoa ei voitu lukea."));
+      reject(new Error(unreadable));
     };
-    video.src = url;
+    media.src = url;
   });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const MAX_IMAGES = 8;
 const MAX_VIDEO_SECONDS = 180;
@@ -16,9 +16,6 @@ export function MediaFields({
   const [video, setVideo] = useState<Uploaded | null>(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
-  const [recording, setRecording] = useState(false);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const stopTimerRef = useRef<number | null>(null);
   const busyCount = useRef(0);
 
   async function upload(kind: "image" | "video", file: File): Promise<string> {
@@ -79,48 +76,6 @@ export function MediaFields({
     }
   }
 
-  async function startCamera() {
-    setError("");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
-        ? "video/webm;codecs=vp8,opus"
-        : "video/webm";
-      const recorder = new MediaRecorder(stream, { mimeType: mime });
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunks.push(event.data);
-        }
-      };
-      recorder.onstop = () => {
-        if (stopTimerRef.current !== null) {
-          window.clearTimeout(stopTimerRef.current);
-          stopTimerRef.current = null;
-        }
-        stream.getTracks().forEach((track) => track.stop());
-        recorderRef.current = null;
-        setRecording(false);
-        const file = new File(chunks, "ohjevideo.webm", { type: "video/webm" });
-        void withBusy(async () => {
-          const id = await upload("video", file);
-          setVideo({ id, name: "Kameratallenne" });
-        });
-      };
-      recorderRef.current = recorder;
-      setRecording(true);
-      recorder.start();
-      stopTimerRef.current = window.setTimeout(() => {
-        if (recorder.state === "recording") {
-          recorder.stop();
-        }
-      }, MAX_VIDEO_SECONDS * 1000);
-    } catch {
-      setRecording(false);
-      setError("Kameraa ei saatu käyttöön.");
-    }
-  }
-
   return (
     <fieldset className="grid gap-3">
       <legend className="text-sm font-medium">Kuvat ja ohjevideo</legend>
@@ -162,23 +117,138 @@ export function MediaFields({
           ))}
         </ul>
       ) : null}
+      <InstructionVideoControls
+        onFile={(file, source) => {
+          void withBusy(async () => {
+            if (source === "file") {
+              await assertDuration(file);
+            }
+            const id = await upload("video", file);
+            setVideo({ id, name: file.name || "Ohjevideo" });
+          });
+        }}
+      />
+      {video ? <p className="text-sm">{video.name}</p> : null}
+      {video ? <input type="hidden" name="mediaId" value={video.id} /> : null}
+      {images.map((image) => (
+        <input key={image.id} type="hidden" name="mediaId" value={image.id} />
+      ))}
+      {error ? (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      ) : null}
+      {status ? <p className="text-sm text-muted">{status}</p> : null}
+    </fieldset>
+  );
+}
+
+export function InstructionVideoControls({
+  disabled,
+  onFile,
+}: {
+  disabled?: boolean;
+  onFile: (file: File, source: "camera" | "file") => void;
+}) {
+  const [recording, setRecording] = useState(false);
+  const [error, setError] = useState("");
+  const previewRef = useRef<HTMLVideoElement>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const stopTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const preview = previewRef.current;
+    const stream = streamRef.current;
+    if (!recording || !preview || !stream) {
+      return;
+    }
+    preview.srcObject = stream;
+    void preview.play().catch(() => undefined);
+    return () => {
+      preview.srcObject = null;
+    };
+  }, [recording]);
+
+  useEffect(() => {
+    return () => {
+      if (stopTimerRef.current !== null) {
+        window.clearTimeout(stopTimerRef.current);
+      }
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  function stopStream() {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+  }
+
+  async function startCamera() {
+    setError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      streamRef.current = stream;
+      const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
+        ? "video/webm;codecs=vp8,opus"
+        : "video/webm";
+      const recorder = new MediaRecorder(stream, { mimeType: mime });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+      recorder.onstop = () => {
+        if (stopTimerRef.current !== null) {
+          window.clearTimeout(stopTimerRef.current);
+          stopTimerRef.current = null;
+        }
+        stopStream();
+        recorderRef.current = null;
+        setRecording(false);
+        onFile(new File(chunks, "ohjevideo.webm", { type: "video/webm" }), "camera");
+      };
+      recorderRef.current = recorder;
+      setRecording(true);
+      recorder.start();
+      stopTimerRef.current = window.setTimeout(() => {
+        if (recorder.state === "recording") {
+          recorder.stop();
+        }
+      }, MAX_VIDEO_SECONDS * 1000);
+    } catch {
+      stopStream();
+      setRecording(false);
+      setError("Kameraa ei saatu käyttöön.");
+    }
+  }
+
+  return (
+    <div className="grid gap-3">
+      {recording ? (
+        <video
+          ref={previewRef}
+          muted
+          autoPlay
+          playsInline
+          className="aspect-video w-full rounded-lg bg-black object-contain"
+        />
+      ) : null}
       <label className="grid gap-1.5 text-sm">
         Videotiedosto
         <input
           type="file"
           accept="video/mp4,video/webm"
-          className="text-base"
+          disabled={disabled || recording}
+          className="text-base disabled:opacity-60"
           onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = "";
             if (!file) {
               return;
             }
-            void withBusy(async () => {
-              await assertDuration(file);
-              const id = await upload("video", file);
-              setVideo({ id, name: file.name || "Ohjevideo" });
-            });
+            onFile(file, "file");
           }}
         />
       </label>
@@ -194,7 +264,8 @@ export function MediaFields({
         ) : (
           <button
             type="button"
-            className="h-11 rounded-md border border-line bg-card px-4 text-base"
+            disabled={disabled}
+            className="h-11 rounded-md border border-line bg-card px-4 text-base disabled:opacity-60"
             onClick={() => {
               void startCamera();
             }}
@@ -203,21 +274,18 @@ export function MediaFields({
           </button>
         )}
         {recording ? (
-          <span className="self-center text-sm text-muted">Tallennus päättyy 3 minuutissa.</span>
+          <span className="self-center text-sm text-muted">
+            Näet kuvan tästä. Ääni tallentuu, esikatselu on mykistetty. Tallennus päättyy 3
+            minuutissa.
+          </span>
         ) : null}
       </div>
-      {video ? <p className="text-sm">{video.name}</p> : null}
-      {video ? <input type="hidden" name="mediaId" value={video.id} /> : null}
-      {images.map((image) => (
-        <input key={image.id} type="hidden" name="mediaId" value={image.id} />
-      ))}
       {error ? (
         <p role="alert" className="text-sm text-danger">
           {error}
         </p>
       ) : null}
-      {status ? <p className="text-sm text-muted">{status}</p> : null}
-    </fieldset>
+    </div>
   );
 }
 

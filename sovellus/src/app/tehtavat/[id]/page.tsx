@@ -2,15 +2,17 @@ import { Suspense } from "react";
 import Link from "next/link";
 
 import { AppHeader } from "@/components/app-header";
+import { ArchiveAssignmentForm } from "@/components/archive-assignment-form";
 import { AssignmentMediaView } from "@/components/assignment-media";
 import { formatFiDate } from "@/components/assignment-cards";
 import { DeadlineForm } from "@/components/deadline-form";
+import { DraftVideoForm } from "@/components/draft-video-form";
 import { DraftForm } from "@/components/draft-form";
 import { PublishAssignmentForm } from "@/components/publish-assignment-form";
 import { ResponseForm } from "@/components/response-form";
 import { ResponseView } from "@/components/response-view";
 import { ReviewReturnForm } from "@/components/review-return-form";
-import { responseKindLabel, teacherWorkLabel } from "@/lib/assignment-labels";
+import { assignmentStateLabel, responseKindLabel, teacherWorkLabel } from "@/lib/assignment-labels";
 import { getFeedbackTarget, getStudentAssignment, getTeacherAssignment } from "@/lib/assignments";
 import { requireUser } from "@/lib/auth";
 import { deadlineInputValue, formatDeadline } from "@/lib/deadline";
@@ -67,7 +69,7 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
               </p>
             ) : null}
             <p className="mt-1 text-sm text-muted">
-              {assignment.status === "draft" ? "Luonnos" : "Julkaistu"} ·{" "}
+              {assignmentStateLabel(assignment)} ·{" "}
               {formatFiDate(assignment.createdAt)}
               {assignment.responseKind
                 ? ` · Palautus: ${responseKindLabel(assignment.responseKind)}`
@@ -78,7 +80,19 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
           <p className="whitespace-pre-wrap rounded-lg border border-line bg-card p-6">
             {assignment.instructions}
           </p>
-          <AssignmentMediaView media={assignment.media} />
+          <AssignmentMediaView
+            media={
+              assignment.status === "draft"
+                ? assignment.media.filter((item) => item.kind !== "video")
+                : assignment.media
+            }
+          />
+          {assignment.status === "draft" ? (
+            <DraftVideoForm
+              assignmentId={assignment.id}
+              video={assignment.media.find((item) => item.kind === "video") ?? null}
+            />
+          ) : null}
           {assignment.links.length > 0 ? (
             <section className="grid gap-2">
               <h2 className="text-xl font-semibold">Linkit</h2>
@@ -106,6 +120,14 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
                   <li key={question.id}>{question.prompt}</li>
                 ))}
               </ol>
+            </section>
+          ) : null}
+          {assignment.status === "published" ? (
+            <section className="rounded-lg border border-line bg-card p-6">
+              <ArchiveAssignmentForm
+                assignmentId={assignment.id}
+                archived={assignment.archivedAt !== null}
+              />
             </section>
           ) : null}
           <section className="rounded-lg border border-line bg-card p-6">
@@ -186,7 +208,7 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
                     </Link>
                     <span className="text-sm text-muted">
                       {" "}
-                      · {item.status === "draft" ? "Luonnos" : "Julkaistu"}
+                      · {assignmentStateLabel(item)}
                     </span>
                   </li>
                 ))}
@@ -217,6 +239,7 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
             </p>
           ) : null}
           <p className="mt-1 text-sm text-muted">
+            {assignment.archivedAt ? "Arkistoitu · " : ""}
             {assignment.returnedAt
               ? assignment.reviewedAt
                 ? "Tarkistettu"
@@ -264,7 +287,10 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
           <h2 className="mb-4 text-xl font-semibold">
             {assignment.responseKind ? "Vastaus" : "Vastaukset"}
           </h2>
-          {assignment.late && !assignment.returnedAt ? (
+          {assignment.archivedAt && !assignment.returnedAt ? (
+            <p className="text-muted">Tehtävä on arkistoitu, eikä siihen voi enää vastata.</p>
+          ) : null}
+          {assignment.late && !assignment.returnedAt && !assignment.archivedAt ? (
             <p className="mb-4 font-medium text-danger">Myöhässä. Voit silti vastata.</p>
           ) : null}
           {assignment.returnedAt && assignment.responseKind ? (
@@ -280,7 +306,7 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
               ))}
             </ol>
           ) : null}
-          {!assignment.returnedAt && assignment.responseKind ? (
+          {!assignment.returnedAt && !assignment.archivedAt && assignment.responseKind ? (
             <ResponseForm
               assignmentId={assignment.id}
               kind={assignment.responseKind}
@@ -288,7 +314,7 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
               initialMedia={assignment.response.media}
             />
           ) : null}
-          {!assignment.returnedAt && !assignment.responseKind ? (
+          {!assignment.returnedAt && !assignment.archivedAt && !assignment.responseKind ? (
             <DraftForm assignmentId={assignment.id} questions={assignment.questions} />
           ) : null}
         </section>

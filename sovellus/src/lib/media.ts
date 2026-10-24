@@ -2,7 +2,8 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, rename, rm, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, rename, rm, stat } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { Readable, Transform } from "node:stream";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
@@ -19,15 +20,29 @@ import {
   assignments,
 } from "@/lib/db/schema";
 import type { AssignmentMediaItem, CurrentUser, MediaKind } from "@/lib/types";
+import { bufferHasHevc, fileHasHevc, transcodeToAvc } from "@/lib/video-compat";
 import { isUuid } from "@/lib/validation";
 
 export const MAX_IMAGES = 8;
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 150 * 1024 * 1024;
+export const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 export const MAX_VIDEO_SECONDS = 180;
 
 const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const VIDEO_MIMES = new Set(["video/mp4", "video/webm"]);
+const AUDIO_MIMES = new Set([
+  "audio/webm",
+  "audio/mp4",
+  "audio/mpeg",
+  "audio/aac",
+  "audio/wav",
+  "audio/x-m4a",
+  "audio/m4a",
+  "audio/x-wav",
+  "audio/wave",
+]);
+const playableVideos = new Map<string, Promise<void>>();
 
 export class MediaError extends Error {
   constructor(
@@ -45,19 +60,32 @@ function storeKind(): "local" | "gcs" {
 }
 
 function maxBytes(kind: MediaKind): number {
-  return kind === "image" ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES;
+  if (kind === "image") {
+    return MAX_IMAGE_BYTES;
+  }
+  if (kind === "audio") {
+    return MAX_AUDIO_BYTES;
+  }
+  return MAX_VIDEO_BYTES;
 }
 
 function allowedMime(kind: MediaKind, mime: string): boolean {
-  return kind === "image" ? IMAGE_MIMES.has(mime) : VIDEO_MIMES.has(mime);
+  if (kind === "image") {
+    return IMAGE_MIMES.has(mime);
+  }
+  if (kind === "audio") {
+    return AUDIO_MIMES.has(mime);
+  }
+  return VIDEO_MIMES.has(mime);
 }
 
 function objectKeyFor(kind: MediaKind, id: string): string {
-  return `${kind === "image" ? "images" : "videos"}/${id}`;
+  const folder = kind === "image" ? "images" : kind === "audio" ? "audio" : "videos";
+  return `${folder}/${id}`;
 }
 
 function localPath(objectKey: string): string {
-  if (!/^(images|videos)\/[0-9a-f-]{36}$/i.test(objectKey)) {
+  if (!/^(images|videos|audio)\/[0-9a-f-]{36}$/i.test(objectKey)) {
     throw new MediaError("Tiedostoa ei löydy.", 404);
   }
   return path.join(process.cwd(), "data", "media", objectKey);
@@ -112,6 +140,9 @@ export async function createUpload(input: {
 
   const teacher = await requireTeacherUser();
   const kind = checkedKind(input.kind, input.mime, input.byteSize);
+  if (kind.kind === "audio") {
+    throw new MediaError("Tiedoston tyyppi ei kelpaa.", 400);
+  }
   const id = randomUUID();
   const objectKey = objectKeyFor(kind.kind, id);
   await db.insert(assignmentMedia).values({
@@ -133,7 +164,7 @@ function checkedKind(
   rawMime: string,
   byteSize: number,
 ): { kind: MediaKind; mime: string } {
-  if (rawKind !== "image" && rawKind !== "video") {
+  if (rawKind !== "image" && rawKind !== "video" && rawKind !== "audio") {
     throw new MediaError("Tiedoston tyyppi ei kelpaa.", 400);
   }
   const kind = rawKind;
@@ -142,7 +173,9 @@ function checkedKind(
     throw new MediaError(
       kind === "image"
         ? "Kuva saa olla jpeg, png tai webp."
-        : "Video saa olla mp4 tai webm.",
+        : kind === "video"
+          ? "Video saa olla mp4 tai webm."
+          : "Äänite saa olla webm, mp4, mpeg, aac tai wav.",
       400,
     );
   }
@@ -176,6 +209,7 @@ async function createResponseUpload(input: {
     .select({
       responseKind: assignments.responseKind,
       returnedAt: assignmentStudents.returnedAt,
+      archivedAt: assignments.archivedAt,
     })
     .from(assignmentStudents)
     .innerJoin(assignments, eq(assignments.id, assignmentStudents.assignmentId))
@@ -190,6 +224,9 @@ async function createResponseUpload(input: {
   const assignment = rows[0];
   if (!assignment || assignment.responseKind !== kind.kind) {
     throw new MediaError("Tehtävää ei löydy.", 404);
+  }
+  if (assignment.archivedAt) {
+    throw new MediaError("Tehtävä on arkistoitu.", 400);
   }
   if (assignment.returnedAt) {
     throw new MediaError("Tehtävä on jo palautettu.", 400);
@@ -295,6 +332,7 @@ export async function confirmUpload(id: string): Promise<void> {
     if (row.status !== "ready") {
       await assertStoredSize(row);
     }
+    await ensurePlayableVideo(row);
     await attachStudentResponse(row);
     return;
   }
@@ -306,6 +344,7 @@ export async function confirmUpload(id: string): Promise<void> {
   }
 
   await assertStoredSize(row);
+  await ensurePlayableVideo(row);
   await db
     .update(assignmentMedia)
     .set({ status: "ready" })
@@ -321,7 +360,7 @@ async function assertStoredSize(row: MediaRow): Promise<void> {
 }
 
 async function attachStudentResponse(row: MediaRow): Promise<void> {
-  if (!row.assignmentId || !row.studentId || (row.kind !== "image" && row.kind !== "video")) {
+  if (!row.assignmentId || !row.studentId) {
     throw new MediaError("Tiedostoa ei löydy.", 404);
   }
   const assignmentId = row.assignmentId;
@@ -440,6 +479,53 @@ async function removeStored(row: MediaRow): Promise<void> {
   await file.delete({ ignoreNotFound: true });
 }
 
+export async function replaceDraftInstructionVideo(input: {
+  teacherId: string;
+  assignmentId: string;
+  mediaId: string | null;
+}): Promise<void> {
+  if (input.mediaId) {
+    const selected = await db
+      .select({ id: assignmentMedia.id })
+      .from(assignmentMedia)
+      .where(
+        and(
+          eq(assignmentMedia.id, input.mediaId),
+          eq(assignmentMedia.createdBy, input.teacherId),
+          eq(assignmentMedia.kind, "video"),
+          eq(assignmentMedia.status, "ready"),
+          isNull(assignmentMedia.assignmentId),
+          isNull(assignmentMedia.studentId),
+        ),
+      )
+      .limit(1);
+    if (!selected[0]) {
+      throw new MediaError("Videota ei löydy. Lisää se uudelleen.", 400);
+    }
+    await db
+      .update(assignmentMedia)
+      .set({ assignmentId: input.assignmentId, sortOrder: 100 })
+      .where(eq(assignmentMedia.id, input.mediaId));
+  }
+
+  const ownedVideo = [
+    eq(assignmentMedia.assignmentId, input.assignmentId),
+    eq(assignmentMedia.kind, "video" as const),
+    isNull(assignmentMedia.studentId),
+  ];
+  if (input.mediaId) {
+    ownedVideo.push(ne(assignmentMedia.id, input.mediaId));
+  }
+  const previous = await db
+    .select()
+    .from(assignmentMedia)
+    .where(and(...ownedVideo));
+  for (const row of previous) {
+    await removeStored(row);
+    await db.delete(assignmentMedia).where(eq(assignmentMedia.id, row.id));
+  }
+}
+
 export async function listAssignmentMedia(assignmentId: string): Promise<AssignmentMediaItem[]> {
   return db
     .select({
@@ -511,6 +597,9 @@ export async function validateMediaSelection(
 
   const byId = new Map(rows.map((row) => [row.id, row.kind]));
   const ordered = uniqueIds.map((id) => byId.get(id));
+  if (ordered.some((kind) => kind !== "image" && kind !== "video")) {
+    throw new MediaError("Tiedoston tyyppi ei kelpaa.", 400);
+  }
   const images = ordered.filter((kind) => kind === "image").length;
   const videos = ordered.filter((kind) => kind === "video").length;
   if (images > MAX_IMAGES) {
@@ -582,6 +671,8 @@ export async function openMedia(id: string): Promise<
     }
   }
 
+  await ensurePlayableVideo(row);
+
   if (storeKind() === "gcs") {
     const file = await gcsFile(row.objectKey);
     const [url] = await file.getSignedUrl({
@@ -610,6 +701,114 @@ export function mediaErrorResponse(error: unknown): Response {
   }
   console.error(error);
   return Response.json({ error: "Tallennus epäonnistui." }, { status: 500 });
+}
+
+async function ensurePlayableVideo(row: MediaRow): Promise<void> {
+  if (row.kind !== "video" || row.mime !== "video/mp4") {
+    return;
+  }
+  const current = playableVideos.get(row.id);
+  if (current) {
+    return current;
+  }
+  const job = rewriteHevc(row).finally(() => {
+    playableVideos.delete(row.id);
+  });
+  playableVideos.set(row.id, job);
+  return job;
+}
+
+async function rewriteHevc(row: MediaRow): Promise<void> {
+  try {
+    if (storeKind() === "local") {
+      await rewriteLocalHevc(row);
+      return;
+    }
+    await rewriteGcsHevc(row);
+  } catch (error) {
+    if (error instanceof MediaError) {
+      throw error;
+    }
+    console.error(error);
+    throw new MediaError("Videon kuvaa ei voitu muuntaa selaimeen.", 500);
+  }
+}
+
+async function rewriteLocalHevc(row: MediaRow): Promise<void> {
+  const source = localPath(row.objectKey);
+  if (!(await fileHasHevc(source))) {
+    return;
+  }
+  const output = `${source}.h264`;
+  try {
+    await transcodeToAvc(source, output);
+    const info = await stat(output);
+    if (info.size < 1) {
+      throw new MediaError("Videon muunnosta ei voitu tehdä.", 500);
+    }
+    await rename(output, source);
+    await db
+      .update(assignmentMedia)
+      .set({ byteSize: info.size })
+      .where(eq(assignmentMedia.id, row.id));
+  } catch (error) {
+    await rm(output, { force: true });
+    throw error;
+  }
+}
+
+async function rewriteGcsHevc(row: MediaRow): Promise<void> {
+  const file = await gcsFile(row.objectKey);
+  const [metadata] = await file.getMetadata();
+  const size = Number(metadata.size ?? 0);
+  if (size < 1) {
+    return;
+  }
+  const headEnd = Math.min(size - 1, 2 * 1024 * 1024 - 1);
+  const head = await readStoredRange(file, 0, headEnd);
+  let hevc = bufferHasHevc(head);
+  if (!hevc && size > head.length) {
+    const tailStart = Math.max(0, size - 2 * 1024 * 1024);
+    const tail = await readStoredRange(file, tailStart, size - 1);
+    hevc = bufferHasHevc(tail);
+  }
+  if (!hevc) {
+    return;
+  }
+
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hevc-"));
+  const input = path.join(directory, "in.mp4");
+  const output = path.join(directory, "out.mp4");
+  try {
+    await file.download({ destination: input });
+    await transcodeToAvc(input, output);
+    const info = await stat(output);
+    if (info.size < 1) {
+      throw new MediaError("Videon muunnosta ei voitu tehdä.", 500);
+    }
+    await pipeline(
+      createReadStream(output),
+      file.createWriteStream({
+        metadata: { contentType: "video/mp4" },
+        resumable: false,
+      }),
+    );
+    await db
+      .update(assignmentMedia)
+      .set({ byteSize: info.size })
+      .where(eq(assignmentMedia.id, row.id));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function readStoredRange(
+  file: Awaited<ReturnType<typeof gcsFile>>,
+  start: number,
+  end: number,
+): Promise<Buffer> {
+  const [contents] = await file.download({ start, end });
+  return contents;
 }
 
 async function gcsFile(objectKey: string) {

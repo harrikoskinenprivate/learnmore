@@ -33,8 +33,10 @@ Käyttö: ./scripts/deploy-infra.sh <komento>
 Komentoja ei ajeta sovellusversion julkaisussa. Aja vain se komento, jonka kohde muuttuu.
 
   registry   Artifact Registry -docker-repo, jos se puuttuu.
-  sql        Cloud SQL -instanssi, tietokanta ja käyttäjä sekä DATABASE_URL-secret, jos ne puuttuvat.
-             Ei vaihda olemassa olevaa salasanaa eikä secretin arvoa.
+  sql        Käyttää olemassa olevaa Cloud SQL -instanssia (oletus hk-pgsql2)
+             ja tietokantaa learnmore. Luo tietokannan, käyttäjän ja
+             DATABASE_URL-secretin, jos ne puuttuvat. Ei luo instanssia
+             eikä vaihda olemassa olevaa salasanaa tai secretin arvoa.
   secrets    Vaihtaa tietokannan salasanan ja kirjoittaa uuden secret-version.
              Vaatii ympäristömuuttujan DB_PASSWORD. Ei päivitä Cloud Runia.
   bucket     Yksityinen Cloud Storage -bucket kuville ja ohjevideolle, jos se puuttuu.
@@ -48,6 +50,10 @@ Komentoja ei ajeta sovellusversion julkaisussa. Aja vain se komento, jonka kohde
   seed       Luo ensimmäisen opettajan, jos kannassa ei ole opettajaa.
              Vaatii TEACHER_NAME, TEACHER_EMAIL ja TEACHER_PASSWORD.
              Ei lue sovellus/.env-tiedostoa eikä vaihda olemassa olevaa opettajaa.
+  add-teacher
+             Lisää opettajan, vaikka kannassa olisi jo opettaja.
+             Vaatii samat muuttujat kuin seed. Sama sähköposti hylätään,
+             eikä olemassa olevaa salasanaa vaihdeta.
 
 Versiojulkaisu: ./scripts/deploy-hosting.sh
 EOF
@@ -128,20 +134,9 @@ cmd_sql() {
   gcloud services enable sqladmin.googleapis.com secretmanager.googleapis.com --project="${PROJECT_ID}"
 
   if ! instance_exists; then
-    echo "Luodaan Cloud SQL -instanssi ${SQL_INSTANCE} alueelle ${REGION}. Tämä voi kestää useita minuutteja."
-    gcloud sql instances create "${SQL_INSTANCE}" \
-      --project="${PROJECT_ID}" \
-      --database-version=POSTGRES_16 \
-      --edition=enterprise \
-      --tier="${SQL_TIER}" \
-      --region="${REGION}" \
-      --availability-type=zonal \
-      --storage-type=SSD \
-      --storage-size=10 \
-      --quiet
-  else
-    echo "Cloud SQL -instanssi on jo olemassa: ${SQL_INSTANCE}"
+    die "Cloud SQL -instanssia ${SQL_INSTANCE} ei ole projektissa ${PROJECT_ID}. Skripti ei luo instanssia."
   fi
+  echo "Käytetään Cloud SQL -instanssia ${SQL_INSTANCE}."
 
   if ! database_exists; then
     gcloud sql databases create "${SQL_DATABASE}" \
@@ -173,7 +168,8 @@ cmd_sql() {
   fi
 
   local DB_PASSWORD
-  DB_PASSWORD="$(openssl rand -base64 32 | tr -d '\n' | tr '/+=' 'xyz')"
+  # Cloud SQL vaatii pienen ja ison kirjaimen, numeron ja erikoismerkin.
+  DB_PASSWORD="$(openssl rand -base64 32 | tr -d '\n')Aa1!"
   gcloud sql users create "${SQL_USER}" \
     --instance="${SQL_INSTANCE}" \
     --project="${PROJECT_ID}" \
@@ -261,12 +257,32 @@ cmd_bucket() {
 
   local origins='["http://localhost:3000"]'
   if service_exists; then
-    local run_url
-    run_url="$(gcloud run services describe "${SERVICE}" \
+    local service_json
+    service_json="$(gcloud run services describe "${SERVICE}" \
       --region="${REGION}" \
       --project="${PROJECT_ID}" \
-      --format='value(status.url)')"
-    origins="$(printf '["http://localhost:3000","%s"]' "${run_url}")"
+      --format=json)"
+    origins="$(
+      SERVICE_JSON="${service_json}" python3 -c 'import json, os
+raw = json.loads(os.environ["SERVICE_JSON"])
+origins = ["http://localhost:3000"]
+status = ((raw.get("status") or {}).get("url") or "").strip()
+if status:
+    origins.append(status)
+annotation = ((raw.get("metadata") or {}).get("annotations") or {}).get("run.googleapis.com/urls") or ""
+if annotation:
+    try:
+        extra = json.loads(annotation)
+    except json.JSONDecodeError:
+        extra = []
+    if isinstance(extra, list):
+        origins.extend(str(item) for item in extra if item)
+seen = []
+for item in origins:
+    if item not in seen:
+        seen.append(item)
+print(json.dumps(seen, separators=(",", ":")))'
+    )"
   fi
 
   local cors_file
@@ -428,6 +444,20 @@ cmd_seed() {
   echo "Opettajan luonti ajettiin. Olemassa olevan opettajan salasanaa ei vaihdeta."
 }
 
+cmd_add_teacher() {
+  local name="${TEACHER_NAME:-}"
+  local email="${TEACHER_EMAIL:-}"
+  local password="${TEACHER_PASSWORD:-}"
+  if [[ -z "${name}" || -z "${email}" || ${#password} -lt 8 ]]; then
+    die "Aseta TEACHER_NAME, TEACHER_EMAIL ja vähintään 8 merkin TEACHER_PASSWORD. Sovellus/.env-tiedostoa ei lueta."
+  fi
+  with_database \
+    env TEACHER_NAME="${name}" TEACHER_EMAIL="${email}" TEACHER_PASSWORD="${password}" \
+    "${ROOT_DIR}/sovellus/node_modules/.bin/tsx" scripts/add-teacher.ts
+  unset password
+  echo "Opettaja lisättiin. Olemassa olevaa salasanaa ei vaihdeta."
+}
+
 main() {
   local command="${1:-}"
   case "${command}" in
@@ -438,6 +468,7 @@ main() {
     config) cmd_config ;;
     migrate) cmd_migrate ;;
     seed) cmd_seed ;;
+    add-teacher) cmd_add_teacher ;;
     -h|--help|help|"") usage ;;
     *)
       usage >&2

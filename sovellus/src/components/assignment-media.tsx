@@ -15,7 +15,7 @@ export function AssignmentMediaView({ media }: { media: AssignmentMediaItem[] })
           key={item.id}
           controls
           preload="metadata"
-          className="w-full rounded-lg bg-black"
+          className="aspect-video w-full rounded-lg bg-black object-contain"
           src={`/api/media/${item.id}`}
         />
       ))}

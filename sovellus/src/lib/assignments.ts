@@ -2,13 +2,20 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
-import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { notFound } from "next/navigation";
 
 import { requireTeacher, requireUser } from "@/lib/auth";
-import { isLate, parseDeadlineInput } from "@/lib/deadline";
-import { attachMedia, listAssignmentMedia, MediaError, validateMediaSelection } from "@/lib/media";
+import { studentTaskLabel, withFeedback } from "@/lib/assignment-labels";
+import { formatDeadline, isLate, parseDeadlineInput } from "@/lib/deadline";
+import {
+  attachMedia,
+  listAssignmentMedia,
+  MediaError,
+  replaceDraftInstructionVideo,
+  validateMediaSelection,
+} from "@/lib/media";
 import { db } from "@/lib/db";
 import {
   answers,
@@ -21,9 +28,12 @@ import {
   users,
 } from "@/lib/db/schema";
 import type {
+  ArchivedAssignmentPage,
+  ArchiveCursor,
   AssignmentMediaItem,
   FormState,
   LinkedAssignment,
+  MediaKind,
   ResponseKind,
   StoredResponse,
   StudentAssignmentDetail,
@@ -32,6 +42,7 @@ import type {
   TeacherDraftListItem,
   TeacherWorkItem,
 } from "@/lib/types";
+import { ARCHIVE_PAGE_SIZE } from "@/lib/types";
 import {
   isUuid,
   validateAnswer,
@@ -45,12 +56,12 @@ const MAX_LINKS = 15;
 const parentAssignment = alias(assignments, "parent_assignment");
 
 function isResponseKind(value: string): value is ResponseKind {
-  return value === "text" || value === "image" || value === "video";
+  return value === "text" || value === "image" || value === "video" || value === "audio";
 }
 
 function readyMedia(row: {
   mediaId: string | null;
-  kind: "image" | "video" | null;
+  kind: MediaKind | null;
   mime: string | null;
   status: "pending" | "ready" | null;
 } | undefined): AssignmentMediaItem | null {
@@ -99,8 +110,47 @@ export async function listTeacherWork(): Promise<TeacherWorkItem[]> {
     .innerJoin(assignments, eq(assignments.id, assignmentStudents.assignmentId))
     .innerJoin(users, eq(users.id, assignmentStudents.studentId))
     .leftJoin(parentAssignment, eq(parentAssignment.id, assignments.parentAssignmentId))
-    .where(eq(assignments.status, "published"))
+    .where(and(eq(assignments.status, "published"), isNull(assignments.archivedAt)))
     .orderBy(asc(assignments.createdAt), asc(users.name));
+
+  return rows.map((row) => ({
+    ...row,
+    late: isLate(row.deadline, row.returnedAt, now),
+  }));
+}
+
+export async function listTeacherAssignmentsForStudent(
+  studentId: string,
+): Promise<TeacherWorkItem[]> {
+  await requireTeacher();
+  if (!isUuid(studentId)) {
+    notFound();
+  }
+
+  const now = new Date();
+  const rows = await db
+    .select({
+      assignmentId: assignments.id,
+      title: assignments.title,
+      createdAt: assignments.createdAt,
+      deadline: assignments.deadline,
+      studentId: users.id,
+      studentName: users.name,
+      returnedAt: assignmentStudents.returnedAt,
+      reviewedAt: assignmentStudents.reviewedAt,
+      parentTitle: parentAssignment.title,
+    })
+    .from(assignmentStudents)
+    .innerJoin(assignments, eq(assignments.id, assignmentStudents.assignmentId))
+    .innerJoin(users, eq(users.id, assignmentStudents.studentId))
+    .leftJoin(parentAssignment, eq(parentAssignment.id, assignments.parentAssignmentId))
+    .where(
+      and(
+        eq(assignmentStudents.studentId, studentId),
+        eq(assignments.status, "published"),
+        isNull(assignments.archivedAt),
+      ),
+    );
 
   return rows.map((row) => ({
     ...row,
@@ -129,7 +179,11 @@ export async function listStudentAssignments(): Promise<StudentAssignmentListIte
     .innerJoin(assignments, eq(assignments.id, assignmentStudents.assignmentId))
     .leftJoin(parentAssignment, eq(parentAssignment.id, assignments.parentAssignmentId))
     .where(
-      and(eq(assignmentStudents.studentId, user.id), eq(assignments.status, "published")),
+      and(
+        eq(assignmentStudents.studentId, user.id),
+        eq(assignments.status, "published"),
+        isNull(assignments.archivedAt),
+      ),
     )
     .orderBy(asc(assignments.createdAt));
 
@@ -168,6 +222,178 @@ export async function listStudentAssignments(): Promise<StudentAssignmentListIte
   }));
 }
 
+function formatArchiveDate(value: Date): string {
+  return new Intl.DateTimeFormat("fi-FI", { dateStyle: "medium" }).format(value);
+}
+
+function archiveCursorFilter(cursor?: ArchiveCursor) {
+  if (!cursor) {
+    return undefined;
+  }
+  const archivedAt = new Date(cursor.archivedAt);
+  if (!isUuid(cursor.id) || Number.isNaN(archivedAt.getTime())) {
+    return undefined;
+  }
+  return or(
+    lt(assignments.archivedAt, archivedAt),
+    and(eq(assignments.archivedAt, archivedAt), lt(assignments.id, cursor.id)),
+  );
+}
+
+export async function listArchivedAssignments(
+  cursor?: ArchiveCursor,
+): Promise<ArchivedAssignmentPage> {
+  const user = await requireUser();
+  if (cursor && !archiveCursorFilter(cursor)) {
+    return { items: [], nextCursor: null };
+  }
+  const cursorFilter = archiveCursorFilter(cursor);
+  const where = cursorFilter
+    ? and(
+        eq(assignments.status, "published"),
+        isNotNull(assignments.archivedAt),
+        cursorFilter,
+      )
+    : and(eq(assignments.status, "published"), isNotNull(assignments.archivedAt));
+
+  if (user.role === "teacher") {
+    const rows = await db
+      .select({
+        id: assignments.id,
+        title: assignments.title,
+        deadline: assignments.deadline,
+        archivedAt: assignments.archivedAt,
+        parentTitle: parentAssignment.title,
+      })
+      .from(assignments)
+      .leftJoin(parentAssignment, eq(parentAssignment.id, assignments.parentAssignmentId))
+      .where(where)
+      .orderBy(desc(assignments.archivedAt), desc(assignments.id))
+      .limit(ARCHIVE_PAGE_SIZE + 1);
+
+    const page = rows.slice(0, ARCHIVE_PAGE_SIZE);
+    const last = rows.length > ARCHIVE_PAGE_SIZE ? page[page.length - 1] : null;
+    return {
+      items: page.flatMap((row) => {
+        if (!row.archivedAt) {
+          return [];
+        }
+        const deadline = row.deadline ? ` · Määräaika ${formatDeadline(row.deadline)}` : "";
+        return [
+          {
+            id: row.id,
+            title: row.title,
+            meta: withFeedback(
+              row.parentTitle,
+              `Arkistoitu ${formatArchiveDate(row.archivedAt)}${deadline}`,
+            ),
+          },
+        ];
+      }),
+      nextCursor:
+        last?.archivedAt != null
+          ? { archivedAt: last.archivedAt.toISOString(), id: last.id }
+          : null,
+    };
+  }
+
+  if (user.role !== "student") {
+    notFound();
+  }
+
+  const now = new Date();
+  const rows = await db
+    .select({
+      id: assignments.id,
+      title: assignments.title,
+      deadline: assignments.deadline,
+      archivedAt: assignments.archivedAt,
+      returnedAt: assignmentStudents.returnedAt,
+      reviewedAt: assignmentStudents.reviewedAt,
+      parentTitle: parentAssignment.title,
+    })
+    .from(assignmentStudents)
+    .innerJoin(assignments, eq(assignments.id, assignmentStudents.assignmentId))
+    .leftJoin(parentAssignment, eq(parentAssignment.id, assignments.parentAssignmentId))
+    .where(and(eq(assignmentStudents.studentId, user.id), where))
+    .orderBy(desc(assignments.archivedAt), desc(assignments.id))
+    .limit(ARCHIVE_PAGE_SIZE + 1);
+
+  const page = rows.slice(0, ARCHIVE_PAGE_SIZE);
+  const ids = page.map((row) => row.id);
+  const draftIds = await draftIdsForStudent(user.id, ids);
+  const last = rows.length > ARCHIVE_PAGE_SIZE ? page[page.length - 1] : null;
+
+  return {
+    items: page.flatMap((row) => {
+      if (!row.archivedAt) {
+        return [];
+      }
+      const deadline = row.deadline ? ` · Määräaika ${formatDeadline(row.deadline)}` : "";
+      const label = studentTaskLabel({
+        hasDraft: draftIds.has(row.id),
+        returnedAt: row.returnedAt,
+        reviewedAt: row.reviewedAt,
+        late: isLate(row.deadline, row.returnedAt, now),
+      });
+      return [
+        {
+          id: row.id,
+          title: row.title,
+          meta: withFeedback(
+            row.parentTitle,
+            `${label} · Arkistoitu ${formatArchiveDate(row.archivedAt)}${deadline}`,
+          ),
+        },
+      ];
+    }),
+    nextCursor:
+      last?.archivedAt != null
+        ? { archivedAt: last.archivedAt.toISOString(), id: last.id }
+        : null,
+  };
+}
+
+async function draftIdsForStudent(studentId: string, assignmentIds: string[]): Promise<Set<string>> {
+  if (assignmentIds.length === 0) {
+    return new Set();
+  }
+
+  const [drafts, responses] = await Promise.all([
+    db
+      .select({
+        assignmentId: answers.assignmentId,
+        body: answers.body,
+      })
+      .from(answers)
+      .where(and(eq(answers.studentId, studentId), inArray(answers.assignmentId, assignmentIds))),
+    db
+      .select({
+        assignmentId: assignmentResponses.assignmentId,
+        body: assignmentResponses.body,
+        status: assignmentMedia.status,
+      })
+      .from(assignmentResponses)
+      .leftJoin(assignmentMedia, eq(assignmentMedia.id, assignmentResponses.mediaId))
+      .where(
+        and(
+          eq(assignmentResponses.studentId, studentId),
+          inArray(assignmentResponses.assignmentId, assignmentIds),
+        ),
+      ),
+  ]);
+
+  const draftIds = new Set(
+    drafts.filter((row) => row.body.trim().length > 0).map((row) => row.assignmentId),
+  );
+  for (const response of responses) {
+    if (response.body.trim().length > 0 || response.status === "ready") {
+      draftIds.add(response.assignmentId);
+    }
+  }
+  return draftIds;
+}
+
 export async function getTeacherAssignment(id: string): Promise<TeacherAssignmentDetail> {
   await requireTeacher();
   if (!isUuid(id)) {
@@ -180,6 +406,7 @@ export async function getTeacherAssignment(id: string): Promise<TeacherAssignmen
       title: assignments.title,
       instructions: assignments.instructions,
       status: assignments.status,
+      archivedAt: assignments.archivedAt,
       responseKind: assignments.responseKind,
       parentAssignmentId: assignments.parentAssignmentId,
       deadline: assignments.deadline,
@@ -284,6 +511,25 @@ export async function getTeacherAssignment(id: string): Promise<TeacherAssignmen
   };
 }
 
+export async function getTeacherStudentWork(studentId: string, assignmentId: string) {
+  if (!isUuid(studentId) || !isUuid(assignmentId)) {
+    notFound();
+  }
+
+  const assignment = await getTeacherAssignment(assignmentId);
+  const student = assignment.students.find((item) => item.id === studentId);
+  if (!student) {
+    notFound();
+  }
+
+  const context = await loadParentAndFeedback(
+    assignment.id,
+    assignment.parent?.id ?? null,
+    studentId,
+  );
+  return { ...assignment, feedback: context.feedback, student };
+}
+
 export async function getStudentAssignment(id: string): Promise<StudentAssignmentDetail> {
   const user = await requireUser();
   if (user.role !== "student" || !isUuid(id)) {
@@ -294,6 +540,7 @@ export async function getStudentAssignment(id: string): Promise<StudentAssignmen
     .select({
       returnedAt: assignmentStudents.returnedAt,
       reviewedAt: assignmentStudents.reviewedAt,
+      archivedAt: assignments.archivedAt,
       deadline: assignments.deadline,
       responseKind: assignments.responseKind,
       parentAssignmentId: assignments.parentAssignmentId,
@@ -392,6 +639,7 @@ export async function getStudentAssignment(id: string): Promise<StudentAssignmen
     hasDraft: assignment.responseKind ? hasTypedDraft : hasQuestionDraft,
     returnedAt: assignment.returnedAt,
     reviewedAt: assignment.reviewedAt,
+    archivedAt: assignment.archivedAt,
     late: isLate(assignment.deadline, assignment.returnedAt, new Date()),
   };
 }
@@ -552,6 +800,7 @@ export async function saveDraft(input: {
   const allowed = await db
     .select({
       returnedAt: assignmentStudents.returnedAt,
+      archivedAt: assignments.archivedAt,
     })
     .from(assignmentStudents)
     .innerJoin(assignments, eq(assignments.id, assignmentStudents.assignmentId))
@@ -566,6 +815,9 @@ export async function saveDraft(input: {
 
   if (!allowed[0]) {
     return { error: "Tehtävää ei löydy." };
+  }
+  if (allowed[0].archivedAt) {
+    return { error: "Tehtävä on arkistoitu." };
   }
   if (allowed[0].returnedAt) {
     return { error: "Tehtävä on jo palautettu." };
@@ -625,6 +877,9 @@ export async function saveTextResponse(assignmentId: string, body: string): Prom
     if (open === "missing") {
       return "missing" as const;
     }
+    if (open === "archived") {
+      return "archived" as const;
+    }
     if (open === "returned") {
       return "returned" as const;
     }
@@ -650,6 +905,9 @@ export async function saveTextResponse(assignmentId: string, body: string): Prom
   if (saved === "missing") {
     return { error: "Tehtävää ei löydy." };
   }
+  if (saved === "archived") {
+    return { error: "Tehtävä on arkistoitu." };
+  }
   if (saved === "returned") {
     return { error: "Tehtävä on jo palautettu." };
   }
@@ -667,7 +925,10 @@ export async function returnAssignment(input: {
   }
 
   const rows = await db
-    .select({ responseKind: assignments.responseKind })
+    .select({
+      responseKind: assignments.responseKind,
+      archivedAt: assignments.archivedAt,
+    })
     .from(assignmentStudents)
     .innerJoin(assignments, eq(assignments.id, assignmentStudents.assignmentId))
     .where(
@@ -682,10 +943,13 @@ export async function returnAssignment(input: {
   if (!rows[0]) {
     return { error: "Tehtävää ei löydy." };
   }
+  if (rows[0].archivedAt) {
+    return { error: "Tehtävä on arkistoitu." };
+  }
   if (kind === "text") {
     return returnText(user.id, input.assignmentId, input.body ?? "");
   }
-  if (kind === "image" || kind === "video") {
+  if (kind === "image" || kind === "video" || kind === "audio") {
     return returnMedia(user.id, input.assignmentId, kind);
   }
 
@@ -730,8 +994,8 @@ async function returnText(studentId: string, assignmentId: string, body: string)
 
   return db.transaction(async (tx) => {
     const open = await lockOpenResponse(tx, assignmentId, studentId);
-    if (open === "missing") {
-      return { error: "Tehtävää ei löydy." };
+    if (open === "missing" || open === "archived") {
+      return { error: open === "archived" ? "Tehtävä on arkistoitu." : "Tehtävää ei löydy." };
     }
     if (open === "returned" || open.responseKind !== "text") {
       return { error: open === "returned" ? "Tehtävä on jo palautettu." : "Tehtävää ei löydy." };
@@ -766,15 +1030,25 @@ async function returnText(studentId: string, assignmentId: string, body: string)
   });
 }
 
+function missingMediaMessage(kind: "image" | "video" | "audio"): string {
+  if (kind === "image") {
+    return "Lisää kuva ennen palautusta.";
+  }
+  if (kind === "video") {
+    return "Lisää video ennen palautusta.";
+  }
+  return "Lisää äänite ennen palautusta.";
+}
+
 async function returnMedia(
   studentId: string,
   assignmentId: string,
-  kind: "image" | "video",
+  kind: "image" | "video" | "audio",
 ): Promise<FormState> {
   return db.transaction(async (tx) => {
     const open = await lockOpenResponse(tx, assignmentId, studentId);
-    if (open === "missing") {
-      return { error: "Tehtävää ei löydy." };
+    if (open === "missing" || open === "archived") {
+      return { error: open === "archived" ? "Tehtävä on arkistoitu." : "Tehtävää ei löydy." };
     }
     if (open === "returned") {
       return { error: "Tehtävä on jo palautettu." };
@@ -797,7 +1071,7 @@ async function returnMedia(
       )
       .limit(1);
     if (!media[0]) {
-      return { error: kind === "image" ? "Lisää kuva ennen palautusta." : "Lisää video ennen palautusta." };
+      return { error: missingMediaMessage(kind) };
     }
     await tx
       .update(assignmentStudents)
@@ -817,7 +1091,7 @@ async function lockOpenResponse(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   assignmentId: string,
   studentId: string,
-): Promise<{ responseKind: ResponseKind | null } | "missing" | "returned"> {
+): Promise<{ responseKind: ResponseKind | null } | "missing" | "returned" | "archived"> {
   await tx.execute(sql`
     SELECT returned_at
     FROM assignment_students
@@ -828,6 +1102,7 @@ async function lockOpenResponse(
     .select({
       responseKind: assignments.responseKind,
       returnedAt: assignmentStudents.returnedAt,
+      archivedAt: assignments.archivedAt,
     })
     .from(assignmentStudents)
     .innerJoin(assignments, eq(assignments.id, assignmentStudents.assignmentId))
@@ -843,10 +1118,93 @@ async function lockOpenResponse(
   if (!row) {
     return "missing";
   }
+  if (row.archivedAt) {
+    return "archived";
+  }
   if (row.returnedAt) {
     return "returned";
   }
   return { responseKind: row.responseKind };
+}
+
+export async function setDraftInstructionVideo(input: {
+  assignmentId: string;
+  mediaId: string | null;
+}): Promise<FormState> {
+  const teacher = await requireTeacher();
+  if (!isUuid(input.assignmentId) || (input.mediaId !== null && !isUuid(input.mediaId))) {
+    return { error: "Tehtävää ei löydy." };
+  }
+
+  const rows = await db
+    .select({ status: assignments.status })
+    .from(assignments)
+    .where(eq(assignments.id, input.assignmentId))
+    .limit(1);
+  if (!rows[0]) {
+    return { error: "Tehtävää ei löydy." };
+  }
+  if (rows[0].status !== "draft") {
+    return { error: "Vain luonnosta voi muuttaa." };
+  }
+
+  try {
+    await replaceDraftInstructionVideo({
+      teacherId: teacher.id,
+      assignmentId: input.assignmentId,
+      mediaId: input.mediaId,
+    });
+  } catch (error) {
+    if (error instanceof MediaError) {
+      return { error: error.message };
+    }
+    throw error;
+  }
+
+  return {
+    message: input.mediaId ? "Ohjevideo tallennettu." : "Ohjevideo poistettu.",
+  };
+}
+
+export async function setAssignmentArchived(input: {
+  assignmentId: string;
+  archived: boolean;
+}): Promise<FormState> {
+  await requireTeacher();
+  if (!isUuid(input.assignmentId)) {
+    return { error: "Tehtävää ei löydy." };
+  }
+
+  const rows = await db
+    .select({
+      status: assignments.status,
+      archivedAt: assignments.archivedAt,
+    })
+    .from(assignments)
+    .where(eq(assignments.id, input.assignmentId))
+    .limit(1);
+  const assignment = rows[0];
+  if (!assignment) {
+    return { error: "Tehtävää ei löydy." };
+  }
+  if (assignment.status !== "published") {
+    return { error: "Vain julkaistu tehtävä voidaan arkistoida." };
+  }
+  if (input.archived && assignment.archivedAt) {
+    return { message: "Tehtävä on jo arkistoitu." };
+  }
+  if (!input.archived && !assignment.archivedAt) {
+    return { message: "Tehtävä on jo aktiivinen." };
+  }
+
+  await db
+    .update(assignments)
+    .set({ archivedAt: input.archived ? new Date() : null })
+    .where(eq(assignments.id, input.assignmentId));
+
+  return {
+    message: input.archived ? "Tehtävä arkistoitu." : "Tehtävä palautettu aktiiviseksi.",
+  };
 }
 
 export async function publishToStudents(input: {
@@ -1035,6 +1393,7 @@ async function loadParentAndFeedback(
           id: assignments.id,
           title: assignments.title,
           status: assignments.status,
+          archivedAt: assignments.archivedAt,
           createdAt: assignments.createdAt,
         })
         .from(assignments)
@@ -1057,6 +1416,7 @@ async function loadParentAndFeedback(
           id: assignments.id,
           title: assignments.title,
           status: assignments.status,
+          archivedAt: assignments.archivedAt,
           createdAt: assignments.createdAt,
         })
         .from(assignments)

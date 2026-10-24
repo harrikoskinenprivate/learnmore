@@ -5,14 +5,17 @@ import { redirect } from "next/navigation";
 
 import {
   createAssignment,
+  listArchivedAssignments,
   publishToStudents,
   returnAssignment,
   reviewReturn,
   saveDraft,
   saveTextResponse,
+  setAssignmentArchived,
+  setDraftInstructionVideo,
   updateAssignmentDeadline,
 } from "@/lib/assignments";
-import type { FormState } from "@/lib/types";
+import type { ArchiveCursor, ArchivedAssignmentPage, FormState } from "@/lib/types";
 
 export async function addAssignment(
   _prev: FormState,
@@ -115,17 +118,56 @@ export async function saveAssignmentDeadline(
   return result;
 }
 
+export async function loadMoreArchivedAssignments(
+  cursor: ArchiveCursor,
+): Promise<ArchivedAssignmentPage & { error?: string }> {
+  const page = await listArchivedAssignments(cursor);
+  return page;
+}
+
+export async function saveDraftInstructionVideo(
+  assignmentId: string,
+  mediaId: string | null,
+): Promise<FormState> {
+  const result = await setDraftInstructionVideo({ assignmentId, mediaId });
+  if (!result.error) {
+    revalidatePath(`/tehtavat/${assignmentId}`);
+    revalidatePath("/tehtavat");
+  }
+  return result;
+}
+
+export async function archiveAssignment(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+  const result = await setAssignmentArchived({
+    assignmentId,
+    archived: formData.get("intent") !== "restore",
+  });
+  if (!result.error) {
+    revalidatePath(`/tehtavat/${assignmentId}`);
+    revalidatePath("/tehtavat");
+    revalidatePath("/");
+  }
+  return result;
+}
+
 export async function markAssignmentReviewed(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
   const assignmentId = String(formData.get("assignmentId") ?? "");
+  const studentId = String(formData.get("studentId") ?? "");
   const result = await reviewReturn({
     assignmentId,
-    studentId: String(formData.get("studentId") ?? ""),
+    studentId,
   });
   if (!result.error) {
     revalidatePath(`/tehtavat/${assignmentId}`);
+    revalidatePath(`/oppilaat/${studentId}`);
+    revalidatePath(`/oppilaat/${studentId}/tehtavat/${assignmentId}`);
     revalidatePath("/tehtavat");
     revalidatePath("/");
   }

@@ -39,7 +39,25 @@ export type FormState = {
 
 export type AssignmentStatus = "draft" | "published";
 
-export type ResponseKind = "text" | "image" | "video";
+export const ARCHIVE_PAGE_SIZE = 50;
+
+export type ArchiveCursor = {
+  archivedAt: string;
+  id: string;
+};
+
+export type ArchivedAssignmentCard = {
+  id: string;
+  title: string;
+  meta: string;
+};
+
+export type ArchivedAssignmentPage = {
+  items: ArchivedAssignmentCard[];
+  nextCursor: ArchiveCursor | null;
+};
+
+export type ResponseKind = "text" | "image" | "video" | "audio";
 
 export type StoredResponse = {
   body: string;
@@ -50,6 +68,7 @@ export type LinkedAssignment = {
   id: string;
   title: string;
   status: AssignmentStatus;
+  archivedAt: Date | null;
   createdAt: Date;
 };
 
@@ -86,7 +105,7 @@ export type StudentAssignmentListItem = {
   parentTitle: string | null;
 };
 
-export type MediaKind = "image" | "video";
+export type MediaKind = "image" | "video" | "audio";
 
 export type AssignmentMediaItem = {
   id: string;
@@ -105,6 +124,7 @@ export type TeacherAssignmentDetail = {
   title: string;
   instructions: string;
   status: AssignmentStatus;
+  archivedAt: Date | null;
   deadline: Date | null;
   createdAt: Date;
   links: AssignmentLinkItem[];
@@ -139,5 +159,6 @@ export type StudentAssignmentDetail = {
   hasDraft: boolean;
   returnedAt: Date | null;
   reviewedAt: Date | null;
+  archivedAt: Date | null;
   late: boolean;
 };

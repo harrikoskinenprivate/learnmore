@@ -6,7 +6,10 @@ import { AppHeader } from "@/components/app-header";
 import { DeleteStudentForm } from "@/components/delete-student-form";
 import { formatCardUpdated } from "@/components/learning-card";
 import { LearningCardForm } from "@/components/learning-card-form";
+import { LearningCardToggle } from "@/components/learning-card-toggle";
 import { formatFiDate } from "@/components/assignment-cards";
+import { StudentAssignmentTabs } from "@/components/student-assignment-tabs";
+import { listTeacherAssignmentsForStudent } from "@/lib/assignments";
 import { requireTeacher } from "@/lib/auth";
 import { getStudentProfile } from "@/lib/students";
 
@@ -30,8 +33,11 @@ export default function StudentProfilePage({
 
 async function Profile({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const user = await requireTeacher();
-  const profile = await getStudentProfile(id);
+  const [user, profile, tasks] = await Promise.all([
+    requireTeacher(),
+    getStudentProfile(id),
+    listTeacherAssignmentsForStudent(id),
+  ]);
 
   return (
     <div className="grid gap-8">
@@ -41,21 +47,34 @@ async function Profile({ params }: { params: Promise<{ id: string }> }) {
           <Link href="/" className="text-sm text-pine">
             Oppilaat
           </Link>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight">{profile.name}</h1>
-          <p className="mt-1 text-muted">{profile.email}</p>
-          <p className="mt-1 text-sm text-muted">Lisätty {formatFiDate(profile.createdAt)}</p>
+          <div className="mt-2">
+            <LearningCardToggle
+              title={<h1 className="text-2xl font-semibold tracking-tight">{profile.name}</h1>}
+              meta={
+                <>
+                  <p className="mt-1 text-muted">{profile.email}</p>
+                  <p className="mt-1 text-sm text-muted">Lisätty {formatFiDate(profile.createdAt)}</p>
+                </>
+              }
+            >
+              <section className="rounded-lg border border-line bg-card p-6">
+                <h2 className="text-xl font-semibold">Oppijakortti</h2>
+                {profile.card.updatedAt ? (
+                  <p className="mt-1 text-sm text-muted">
+                    Päivitetty {formatCardUpdated(profile.card.updatedAt)}
+                  </p>
+                ) : null}
+                <p className="mt-4 mb-6 text-muted">
+                  Yksi kortti per oppilas. Kentät ovat vapaata tekstiä, ja oppilas näkee ne etusivullaan.
+                </p>
+                <LearningCardForm studentId={profile.id} card={profile.card} />
+              </section>
+            </LearningCardToggle>
+          </div>
         </div>
-        <section className="rounded-lg border border-line bg-card p-6">
-          <h2 className="text-xl font-semibold">Oppijakortti</h2>
-          {profile.card.updatedAt ? (
-            <p className="mt-1 text-sm text-muted">
-              Päivitetty {formatCardUpdated(profile.card.updatedAt)}
-            </p>
-          ) : null}
-          <p className="mt-2 mb-6 text-muted">
-            Yksi kortti per oppilas. Kentät ovat vapaata tekstiä, ja oppilas näkee ne etusivullaan.
-          </p>
-          <LearningCardForm studentId={profile.id} card={profile.card} />
+        <section className="grid gap-4">
+          <h2 className="text-xl font-semibold">Tehtävät</h2>
+          <StudentAssignmentTabs studentId={profile.id} studentName={profile.name} items={tasks} />
         </section>
         <section className="rounded-lg border border-line bg-card p-6">
           <h2 className="text-xl font-semibold">Avainlinkki</h2>

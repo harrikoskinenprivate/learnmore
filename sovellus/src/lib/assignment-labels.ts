@@ -1,3 +1,13 @@
+export function assignmentStateLabel(item: {
+  status: "draft" | "published";
+  archivedAt: Date | null;
+}): string {
+  if (item.archivedAt) {
+    return "Arkistoitu";
+  }
+  return item.status === "draft" ? "Luonnos" : "Aktiivinen";
+}
+
 export function withFeedback(parentTitle: string | null, meta: string): string {
   if (!parentTitle) {
     return meta;
@@ -5,14 +15,17 @@ export function withFeedback(parentTitle: string | null, meta: string): string {
   return `Palaute tehtävään ${parentTitle} · ${meta}`;
 }
 
-export function responseKindLabel(kind: "text" | "image" | "video"): string {
+export function responseKindLabel(kind: "text" | "image" | "video" | "audio"): string {
   if (kind === "text") {
     return "Tekstikenttä";
   }
   if (kind === "image") {
     return "Kuva";
   }
-  return "Video";
+  if (kind === "video") {
+    return "Video";
+  }
+  return "Pelkkä äänite";
 }
 
 export function studentTaskLabel(item: {

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   index,
   type AnyPgColumn,
@@ -13,8 +14,8 @@ import {
 
 export const userRole = pgEnum("user_role", ["teacher", "student"]);
 export const assignmentStatus = pgEnum("assignment_status", ["draft", "published"]);
-export const responseKind = pgEnum("response_kind", ["text", "image", "video"]);
-export const mediaKind = pgEnum("media_kind", ["image", "video"]);
+export const responseKind = pgEnum("response_kind", ["text", "image", "video", "audio"]);
+export const mediaKind = pgEnum("media_kind", ["image", "video", "audio"]);
 export const mediaStatus = pgEnum("media_status", ["pending", "ready"]);
 
 export const users = pgTable("users", {
@@ -67,9 +68,13 @@ export const assignments = pgTable("assignments", {
     onDelete: "cascade",
   }),
   deadline: timestamp("deadline", { withTimezone: true }),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   index("assignments_parent_assignment_id_idx").on(table.parentAssignmentId),
+  index("assignments_archived_at_idx")
+    .on(table.archivedAt, table.id)
+    .where(sql`${table.archivedAt} IS NOT NULL`),
 ]);
 
 export const assignmentLinks = pgTable(

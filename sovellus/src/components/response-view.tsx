@@ -22,15 +22,21 @@ export function ResponseMedia({
   kind,
   media,
 }: {
-  kind: "image" | "video";
+  kind: "image" | "video" | "audio";
   media: AssignmentMediaItem;
 }) {
+  if (kind === "audio") {
+    return (
+      <audio controls preload="metadata" className="w-full" src={`/api/media/${media.id}`} />
+    );
+  }
+
   if (kind === "video") {
     return (
       <video
         controls
         preload="metadata"
-        className="w-full rounded-lg bg-black"
+        className="aspect-video w-full rounded-lg bg-black object-contain"
         src={`/api/media/${media.id}`}
       />
     );

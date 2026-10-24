@@ -6,7 +6,35 @@ Opettajan Tehtävät-sivulla Uusi tehtävä -tekstipainike on vaihdettu plus-pai
 
 Oppilaan näkymässä nimen alla ei ole Tehtävät-painiketta. Oppilaalla ei ole muita näkymiä valittavana, joten valikkoa ei näytetä. Opettajalla nimen alla ovat edelleen Oppilaat ja Tehtävät.
 
+Uuteen tehtävään voi valita palautustavaksi pelkän äänitteen. Oppilas nauhoittaa sen selaimessa: Äänitä pyytää mikrofonin ja tallentaa enintään 3 minuutin ja 25 megatavun äänitteen. Jo tallennetun tiedoston voi valita erikseen. Opettaja kuuntelee palautuksen vasta, kun tehtävä on palautettu. Migraatio on `sovellus/drizzle/0010_audio_response.sql`.
+
+Opettaja näkee oppilaan alla hänelle annetut aktiiviset tehtävät, sekä etusivun listassa että oppilasprofiilissa. Etusivulla lista on kiinni, kunnes sen avaa plus-painikkeesta. Profiiliin pääsee oppilaan nimestä, eikä listassa ole erillistä Avaa-painiketta. Profiilissa lista on auki. Tehtävän avaaminen oppilaan alta vie tämän oppilaan suoritukseen, ei tehtävän yhteiselle sivulle. Kesken ja palautetut ovat omina välilehtinään. Kesken olevista ylimpänä on aikaisin määräaika, ilman määräaikaa oleva on viimeisenä, ja myöhässä oleva korostetaan punaisella. Palautetuista ylimpänä on viimeksi palautettu.
+
+## 22.10.2026
+
+Oppilaan videovastauksen ja ohjevideon katseluikkuna on 16:9. Selain ei enää jätä soitinta oletuskorkeuteen.
+
+Puhelimen HEVC-video muunnetaan H.264-muotoon tallennuksessa ja ensimmäisellä katselulla. Selain näyttää silloin kuvan, ei pelkkää ääntä. Muunnos käyttää kuvan `ffmpeg`-ohjelmaa.
+
+Opettaja voi poistaa ja korvata luonnoksen ohjevideon. Julkaistun tehtävän videota ei vaihdeta. Kuvauksen aikana opettaja näkee kameran kuvan. Esikatselu on mykistetty, ääni tallentuu.
+
+Oppijakortti on kiinni oletuksena. Se avataan nimen perässä olevasta plus-painikkeesta sekä oppilaan etusivulla että opettajan profiilissa.
+
+## 21.10.2026
+
+Uuden opettajan voi lisätä komennolla `npm run db:add-teacher`, ja pilvessä komennolla `./scripts/deploy-infra.sh add-teacher`. Komento ei vaihda olemassa olevaa salasanaa. Kaikki opettajat näkevät samat oppilaat ja tehtävät.
+
+Tehtävän tilat ovat luonnos, aktiivinen ja arkistoitu. Opettaja näkee ne välilehtinä, oppilas aktiiviset ja arkistoidut. Arkistosta haetaan 50 viimeksi arkistoitua, ja seuraavat 50 haetaan erikseen. Arkistoituun tehtävään ei voi enää vastata. Migraatio on `sovellus/drizzle/0009_assignment_archive.sql`.
+
 ## 20.10.2026
+
+Opettajan etusivulla oppilaan lisäys on Oppilaat-otsikon plus-painikkeen takana. Oppilaan profiilissa oppijakortti on kiinni, kunnes otsikkoa napsauttaa.
+
+Cloud SQL -julkaisu käyttää olemassa olevaa instanssia `hk-pgsql2` ja tietokantaa `learnmore`. `sql`-komento ei enää luo instanssia. Jos instanssia ei löydy, komento pysähtyy. Uuden tietokantakäyttäjän salasana täyttää Cloud SQL:n merkkivaatimuksen.
+
+Cloud Run ei enää kaadu tietokantaosoitteeseen, jossa konenimi on tyhjä. Sovellus avaa yhteyden Cloud SQL -unix-socketin tiedostoon. Paikallinen `localhost`-osoite säilyy ennallaan.
+
+Videon lähetys puhelimesta bucketiin vaatii, että bucketin CORS sisältää sen Cloud Run -osoitteen, jolla sivu avattiin. `bucket`-komento kirjaa palvelun kaikki osoitteet, ei vain `status.url`-kentän osoitetta.
 
 Opettaja voi avata palautetusta tehtävästä uuden palautteen. Palaute on oma tehtävä, joka linkittyy aiempaan, ja niitä voi olla useita. Sen voi julkaista vain oppilaalle, joka on palauttanut aiemman tehtävän. Oppilas näkee palautteen omissa listoissaan ja palauttaa sen samalla tavalla. Migraatio on `sovellus/drizzle/0008_assignment_feedback.sql`.
 

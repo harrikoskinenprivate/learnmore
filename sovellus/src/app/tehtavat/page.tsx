@@ -2,9 +2,16 @@ import { Suspense } from "react";
 import Link from "next/link";
 
 import { AppHeader } from "@/components/app-header";
+import { ArchivedAssignmentList } from "@/components/archived-assignment-list";
 import { AssignmentCards } from "@/components/assignment-cards";
+import { AssignmentStateTabs } from "@/components/assignment-state-tabs";
 import { studentTaskLabel, teacherWorkLabel, withFeedback } from "@/lib/assignment-labels";
-import { listStudentAssignments, listTeacherDrafts, listTeacherWork } from "@/lib/assignments";
+import {
+  listArchivedAssignments,
+  listStudentAssignments,
+  listTeacherDrafts,
+  listTeacherWork,
+} from "@/lib/assignments";
 import { requireUser } from "@/lib/auth";
 import { formatDeadline } from "@/lib/deadline";
 import type { StudentAssignmentListItem, TeacherWorkItem } from "@/lib/types";
@@ -51,40 +58,67 @@ async function Assignments() {
   const user = await requireUser();
 
   if (user.role === "student") {
-    const items = await listStudentAssignments();
+    const [items, archived] = await Promise.all([
+      listStudentAssignments(),
+      listArchivedAssignments(),
+    ]);
     const open = items.filter((item) => !item.returnedAt);
     const done = items.filter((item) => item.returnedAt);
     return (
       <div className="grid gap-8">
         <AppHeader user={user} />
         <h1 className="text-2xl font-semibold tracking-tight">Tehtävät</h1>
-        <section className="grid gap-4">
-          <h2 className="text-xl font-semibold">Kesken</h2>
-          <AssignmentCards
-            empty="Ei kesken olevia tehtäviä."
-            items={open.map((item) => ({
-              id: item.id,
-              title: item.title,
-              meta: studentMeta(item),
-            }))}
-          />
-        </section>
-        <section className="grid gap-4">
-          <h2 className="text-xl font-semibold">Tehdyt</h2>
-          <AssignmentCards
-            empty="Ei palautettuja tehtäviä."
-            items={done.map((item) => ({
-              id: item.id,
-              title: item.title,
-              meta: studentMeta(item),
-            }))}
-          />
-        </section>
+        <AssignmentStateTabs
+          initial="aktiiviset"
+          tabs={[
+            {
+              id: "aktiiviset",
+              label: "Aktiiviset",
+              panel: (
+                <>
+                  <section className="grid gap-4">
+                    <h2 className="text-xl font-semibold">Kesken</h2>
+                    <AssignmentCards
+                      empty="Ei kesken olevia tehtäviä."
+                      items={open.map((item) => ({
+                        id: item.id,
+                        title: item.title,
+                        meta: studentMeta(item),
+                      }))}
+                    />
+                  </section>
+                  <section className="grid gap-4">
+                    <h2 className="text-xl font-semibold">Tehdyt</h2>
+                    <AssignmentCards
+                      empty="Ei palautettuja tehtäviä."
+                      items={done.map((item) => ({
+                        id: item.id,
+                        title: item.title,
+                        meta: studentMeta(item),
+                      }))}
+                    />
+                  </section>
+                </>
+              ),
+            },
+            {
+              id: "arkistoidut",
+              label: "Arkistoidut",
+              panel: (
+                <ArchivedAssignmentList items={archived.items} nextCursor={archived.nextCursor} />
+              ),
+            },
+          ]}
+        />
       </div>
     );
   }
 
-  const [drafts, work] = await Promise.all([listTeacherDrafts(), listTeacherWork()]);
+  const [drafts, work, archived] = await Promise.all([
+    listTeacherDrafts(),
+    listTeacherWork(),
+    listArchivedAssignments(),
+  ]);
   const open = work.filter((item) => !item.reviewedAt);
   const done = work.filter((item) => item.reviewedAt);
   const byStudent = new Map<string, { id: string; name: string; items: TeacherWorkItem[] }>();
@@ -112,43 +146,66 @@ async function Assignments() {
           <span aria-hidden="true">+</span>
         </Link>
       </div>
-      <section className="grid gap-4">
-        <h2 className="text-xl font-semibold">Luonnokset</h2>
-        <AssignmentCards
-          empty="Ei luonnoksia."
-          items={drafts.map((item) => ({
-            id: item.id,
-            title: item.title,
-            meta: withFeedback(
-              item.parentTitle,
-              item.deadline ? `Määräaika ${formatDeadline(item.deadline)}` : "Ei määräaikaa",
+      <AssignmentStateTabs
+        initial="aktiiviset"
+        tabs={[
+          {
+            id: "luonnokset",
+            label: "Luonnokset",
+            panel: (
+              <AssignmentCards
+                empty="Ei luonnoksia."
+                items={drafts.map((item) => ({
+                  id: item.id,
+                  title: item.title,
+                  meta: withFeedback(
+                    item.parentTitle,
+                    item.deadline ? `Määräaika ${formatDeadline(item.deadline)}` : "Ei määräaikaa",
+                  ),
+                }))}
+              />
             ),
-          }))}
-        />
-      </section>
-      <section className="grid gap-4">
-        <h2 className="text-xl font-semibold">Kesken</h2>
-        <AssignmentCards empty="Ei kesken olevia tehtäviä." items={workCards(open)} />
-      </section>
-      <section className="grid gap-4">
-        <h2 className="text-xl font-semibold">Tehdyt</h2>
-        <AssignmentCards empty="Ei tarkistettuja tehtäviä." items={workCards(done)} />
-      </section>
-      <section className="grid gap-4">
-        <h2 className="text-xl font-semibold">Oppilaittain</h2>
-        {groups.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-line bg-card p-6 text-muted">
-            Ei julkaistuja tehtäviä.
-          </p>
-        ) : (
-          groups.map((group) => (
-            <div key={group.id} className="grid gap-3">
-              <h3 className="text-lg font-semibold">{group.name}</h3>
-              <AssignmentCards empty="Ei tehtäviä." items={workCards(group.items, false)} />
-            </div>
-          ))
-        )}
-      </section>
+          },
+          {
+            id: "aktiiviset",
+            label: "Aktiiviset",
+            panel: (
+              <>
+                <section className="grid gap-4">
+                  <h2 className="text-xl font-semibold">Kesken</h2>
+                  <AssignmentCards empty="Ei kesken olevia tehtäviä." items={workCards(open)} />
+                </section>
+                <section className="grid gap-4">
+                  <h2 className="text-xl font-semibold">Tehdyt</h2>
+                  <AssignmentCards empty="Ei tarkistettuja tehtäviä." items={workCards(done)} />
+                </section>
+                <section className="grid gap-4">
+                  <h2 className="text-xl font-semibold">Oppilaittain</h2>
+                  {groups.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-line bg-card p-6 text-muted">
+                      Ei julkaistuja tehtäviä.
+                    </p>
+                  ) : (
+                    groups.map((group) => (
+                      <div key={group.id} className="grid gap-3">
+                        <h3 className="text-lg font-semibold">{group.name}</h3>
+                        <AssignmentCards empty="Ei tehtäviä." items={workCards(group.items, false)} />
+                      </div>
+                    ))
+                  )}
+                </section>
+              </>
+            ),
+          },
+          {
+            id: "arkistoidut",
+            label: "Arkistoidut",
+            panel: (
+              <ArchivedAssignmentList items={archived.items} nextCursor={archived.nextCursor} />
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

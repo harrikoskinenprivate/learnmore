@@ -4,7 +4,7 @@ import { useActionState, useState } from "react";
 
 import { addAssignment } from "@/app/actions/assignments";
 import { MediaFields } from "@/components/media-fields";
-import type { FormState } from "@/lib/types";
+import type { FormState, ResponseKind } from "@/lib/types";
 
 const initialState: FormState = {};
 
@@ -23,7 +23,7 @@ export function CreateAssignmentForm({
   const [title, setTitle] = useState("");
   const [instructions, setInstructions] = useState("");
   const [links, setLinks] = useState<LinkRow[]>([{ title: "", url: "" }]);
-  const [responseKind, setResponseKind] = useState<"text" | "image" | "video">("text");
+  const [responseKind, setResponseKind] = useState<ResponseKind>("text");
   const [selected, setSelected] = useState<string[]>(initialSelected);
   const [deadline, setDeadline] = useState("");
   const [mediaBusy, setMediaBusy] = useState(false);
@@ -126,6 +126,7 @@ export function CreateAssignmentForm({
             ["text", "Tekstikenttä"],
             ["image", "Kuva"],
             ["video", "Video"],
+            ["audio", "Pelkkä äänite"],
           ] as const
         ).map(([value, label]) => (
           <label key={value} className="flex min-h-11 items-center gap-3">
