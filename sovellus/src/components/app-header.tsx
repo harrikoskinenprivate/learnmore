@@ -11,22 +11,22 @@ export function AppHeader({ user }: { user: CurrentUser }) {
           <p className="text-sm text-muted">Oppimistehtävät</p>
           <p className="text-lg font-semibold">{user.name}</p>
         </div>
-        <nav className="flex flex-wrap gap-2">
-          {user.role === "teacher" ? (
+        {user.role === "teacher" ? (
+          <nav className="flex flex-wrap gap-2">
             <Link
               href="/"
               className="inline-flex h-11 items-center rounded-md border border-line bg-card px-4 text-base"
             >
               Oppilaat
             </Link>
-          ) : null}
-          <Link
-            href="/tehtavat"
-            className="inline-flex h-11 items-center rounded-md border border-line bg-card px-4 text-base"
-          >
-            Tehtävät
-          </Link>
-        </nav>
+            <Link
+              href="/tehtavat"
+              className="inline-flex h-11 items-center rounded-md border border-line bg-card px-4 text-base"
+            >
+              Tehtävät
+            </Link>
+          </nav>
+        ) : null}
       </div>
       <form action={logout}>
         <button

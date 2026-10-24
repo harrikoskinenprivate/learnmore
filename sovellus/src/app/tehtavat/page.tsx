@@ -106,9 +106,10 @@ async function Assignments() {
         <h1 className="text-2xl font-semibold tracking-tight">Tehtävät</h1>
         <Link
           href="/tehtavat/uusi"
-          className="inline-flex h-11 items-center rounded-md bg-pine px-4 text-base font-medium text-white hover:bg-pine-dark"
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-pine text-2xl leading-none text-white hover:bg-pine-dark"
         >
-          Uusi tehtävä
+          <span className="sr-only">Uusi tehtävä</span>
+          <span aria-hidden="true">+</span>
         </Link>
       </div>
       <section className="grid gap-4">

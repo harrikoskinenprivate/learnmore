@@ -1,5 +1,11 @@
 # Muutosloki
 
+## 24.10.2026
+
+Opettajan Tehtävät-sivulla Uusi tehtävä -tekstipainike on vaihdettu plus-painikkeeksi. Se on samankokoinen ja -värinen kuin oppilaan lisäyksen plus-painike, ja se avaa uuden tehtävän lomakkeen. Ruudunlukijalle nimi on edelleen Uusi tehtävä.
+
+Oppilaan näkymässä nimen alla ei ole Tehtävät-painiketta. Oppilaalla ei ole muita näkymiä valittavana, joten valikkoa ei näytetä. Opettajalla nimen alla ovat edelleen Oppilaat ja Tehtävät.
+
 ## 20.10.2026
 
 Opettaja voi avata palautetusta tehtävästä uuden palautteen. Palaute on oma tehtävä, joka linkittyy aiempaan, ja niitä voi olla useita. Sen voi julkaista vain oppilaalle, joka on palauttanut aiemman tehtävän. Oppilas näkee palautteen omissa listoissaan ja palauttaa sen samalla tavalla. Migraatio on `sovellus/drizzle/0008_assignment_feedback.sql`.
