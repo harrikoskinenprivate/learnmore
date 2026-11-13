@@ -4,7 +4,13 @@ import { useActionState, useCallback, useEffect, useRef, useState, type ChangeEv
 
 import { autosaveTextResponse, saveAssignmentDraft } from "@/app/actions/assignments";
 import { ResponseMedia } from "@/components/response-view";
-import type { AssignmentMediaItem, FormState, ResponseKind } from "@/lib/types";
+import type {
+  AssignmentMediaItem,
+  FormState,
+  MediaKind,
+  ResponseDocument,
+  ResponseKind,
+} from "@/lib/types";
 
 const initialState: FormState = {};
 const MAX_VIDEO_SECONDS = 180;
@@ -12,33 +18,61 @@ const MAX_VIDEO_SECONDS = 180;
 export function ResponseForm({
   assignmentId,
   kind,
+  attachment,
   initialBody,
   initialMedia,
+  initialDocument,
 }: {
   assignmentId: string;
   kind: ResponseKind;
+  attachment: MediaKind | null;
   initialBody: string;
   initialMedia: AssignmentMediaItem | null;
+  initialDocument: ResponseDocument | null;
 }) {
   if (kind === "text") {
-    return <TextResponse assignmentId={assignmentId} initialBody={initialBody} />;
+    return (
+      <TextResponse
+        assignmentId={assignmentId}
+        initialBody={initialBody}
+        attachment={attachment}
+        initialMedia={initialMedia}
+        initialDocument={initialDocument}
+      />
+    );
   }
   return (
-    <MediaResponse assignmentId={assignmentId} kind={kind} initialMedia={initialMedia} />
+    <MediaResponse
+      assignmentId={assignmentId}
+      kind={kind}
+      initialMedia={initialMedia}
+      initialDocument={initialDocument}
+    />
   );
 }
 
 function TextResponse({
   assignmentId,
   initialBody,
+  attachment,
+  initialMedia,
+  initialDocument,
 }: {
   assignmentId: string;
   initialBody: string;
+  attachment: MediaKind | null;
+  initialMedia: AssignmentMediaItem | null;
+  initialDocument: ResponseDocument | null;
 }) {
   const [body, setBody] = useState(initialBody);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [mediaGate, setMediaGate] = useState({
+    media: initialMedia,
+    busy: false,
+    recording: false,
+  });
   const [returnState, returnAction, returning] = useActionState(
     saveAssignmentDraft,
     initialState,
@@ -117,6 +151,15 @@ function TextResponse({
       <p className="text-sm text-muted">
         Teksti tallentuu automaattisesti. Palautuksen jälkeen vastausta ei voi muokata.
       </p>
+      <DocumentControls assignmentId={assignmentId} initialDocument={initialDocument} />
+      {attachment ? (
+        <MediaControls
+          assignmentId={assignmentId}
+          kind={attachment}
+          initialMedia={initialMedia}
+          onState={setMediaGate}
+        />
+      ) : null}
       {error ? (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -136,7 +179,12 @@ function TextResponse({
         type="submit"
         name="intent"
         value="return"
-        disabled={returning || pending}
+        disabled={
+          returning ||
+          pending ||
+          (attachment !== null &&
+            (mediaGate.busy || mediaGate.recording || mediaGate.media === null))
+        }
         className="h-11 justify-self-start rounded-md bg-pine px-4 text-base font-medium text-white hover:bg-pine-dark disabled:opacity-60"
       >
         {returning ? "Tallennetaan…" : "Palauta"}
@@ -149,21 +197,79 @@ function MediaResponse({
   assignmentId,
   kind,
   initialMedia,
+  initialDocument,
 }: {
   assignmentId: string;
   kind: "image" | "video" | "audio";
   initialMedia: AssignmentMediaItem | null;
+  initialDocument: ResponseDocument | null;
+}) {
+  const [gate, setGate] = useState({
+    media: initialMedia,
+    busy: false,
+    recording: false,
+  });
+  const [returnState, returnAction, returning] = useActionState(
+    saveAssignmentDraft,
+    initialState,
+  );
+
+  return (
+    <form action={returnAction} className="grid gap-4">
+      <input type="hidden" name="assignmentId" value={assignmentId} />
+      <DocumentControls assignmentId={assignmentId} initialDocument={initialDocument} />
+      <MediaControls
+        assignmentId={assignmentId}
+        kind={kind}
+        initialMedia={initialMedia}
+        onState={setGate}
+      />
+      {returnState.error ? (
+        <p role="alert" className="text-sm text-danger">
+          {returnState.error}
+        </p>
+      ) : null}
+      <p className="text-sm text-muted">Palautuksen jälkeen vastausta ei voi muokata.</p>
+      <button
+        type="submit"
+        name="intent"
+        value="return"
+        disabled={returning || gate.busy || gate.recording || !gate.media}
+        className="h-11 justify-self-start rounded-md bg-pine px-4 text-base font-medium text-white hover:bg-pine-dark disabled:opacity-60"
+      >
+        {returning ? "Tallennetaan…" : "Palauta"}
+      </button>
+    </form>
+  );
+}
+
+function MediaControls({
+  assignmentId,
+  kind,
+  initialMedia,
+  onState,
+}: {
+  assignmentId: string;
+  kind: "image" | "video" | "audio";
+  initialMedia: AssignmentMediaItem | null;
+  onState: (state: {
+    media: AssignmentMediaItem | null;
+    busy: boolean;
+    recording: boolean;
+  }) => void;
 }) {
   const [media, setMedia] = useState(initialMedia);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
-  const [returnState, returnAction, returning] = useActionState(
-    saveAssignmentDraft,
-    initialState,
-  );
   const cameraRef = useRef<HTMLInputElement>(null);
+  const onStateRef = useRef(onState);
+  onStateRef.current = onState;
+
+  useEffect(() => {
+    onStateRef.current({ media, busy, recording });
+  }, [media, busy, recording]);
 
   async function send(file: File, source: "record" | "file" = "file") {
     setBusy(true);
@@ -205,8 +311,7 @@ function MediaResponse({
   }
 
   return (
-    <form action={returnAction} className="grid gap-4">
-      <input type="hidden" name="assignmentId" value={assignmentId} />
+    <div className="grid gap-4">
       <p className="text-sm text-muted">{mediaHint(kind)}</p>
       {media ? <ResponseMedia kind={kind} media={media} /> : null}
       {kind === "image" ? (
@@ -277,23 +382,81 @@ function MediaResponse({
           {error}
         </p>
       ) : null}
-      {returnState.error ? (
+      {status ? <p className="text-sm text-muted">{status}</p> : null}
+    </div>
+  );
+}
+
+export function DocumentControls({
+  assignmentId,
+  initialDocument,
+}: {
+  assignmentId: string;
+  initialDocument: ResponseDocument | null;
+}) {
+  const [documentFile, setDocumentFile] = useState(initialDocument);
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function send(file: File) {
+    setBusy(true);
+    setError("");
+    setStatus("Lähetetään…");
+    try {
+      const id = await uploadResponse(assignmentId, "file", file);
+      setDocumentFile({
+        id,
+        name: file.name || "tiedosto",
+        mime: file.type.split(";")[0]?.trim().toLowerCase() || "application/octet-stream",
+      });
+      setStatus("Tiedosto tallennettu.");
+    } catch (caught) {
+      setStatus("");
+      setError(caught instanceof Error ? caught.message : "Lähetys epäonnistui.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="grid gap-2">
+      <p className="text-sm text-muted">
+        Voit myös lisätä vastauksen tiedostona laitteelta, esimerkiksi Word-asiakirjana. Enintään 25
+        Mt. Uusi tiedosto korvaa edellisen.
+      </p>
+      {documentFile ? (
+        <a href={`/api/media/${documentFile.id}`} className="text-pine underline">
+          {documentFile.name}
+        </a>
+      ) : null}
+      <label
+        className={`inline-flex h-11 w-fit cursor-pointer items-center rounded-md border border-line bg-card px-4 text-base ${
+          busy ? "pointer-events-none opacity-60" : ""
+        }`}
+      >
+        Lisää tiedosto
+        <input
+          type="file"
+          className="sr-only"
+          disabled={busy}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (!file) {
+              return;
+            }
+            void send(file);
+          }}
+        />
+      </label>
+      {error ? (
         <p role="alert" className="text-sm text-danger">
-          {returnState.error}
+          {error}
         </p>
       ) : null}
       {status ? <p className="text-sm text-muted">{status}</p> : null}
-      <p className="text-sm text-muted">Palautuksen jälkeen vastausta ei voi muokata.</p>
-      <button
-        type="submit"
-        name="intent"
-        value="return"
-        disabled={returning || busy || recording || !media}
-        className="h-11 justify-self-start rounded-md bg-pine px-4 text-base font-medium text-white hover:bg-pine-dark disabled:opacity-60"
-      >
-        {returning ? "Tallennetaan…" : "Palauta"}
-      </button>
-    </form>
+    </div>
   );
 }
 
@@ -517,14 +680,20 @@ function normalizeAudioFile(file: File): File {
 
 async function uploadResponse(
   assignmentId: string,
-  kind: "image" | "video" | "audio",
+  kind: "image" | "video" | "audio" | "file",
   file: File,
 ): Promise<string> {
   const mime = file.type.split(";")[0]?.trim().toLowerCase() ?? "";
   const response = await fetch("/api/media/uploads", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ kind, mime, byteSize: file.size, assignmentId }),
+    body: JSON.stringify({
+      kind,
+      mime,
+      byteSize: file.size,
+      assignmentId,
+      fileName: file.name,
+    }),
   });
   const created = (await response.json()) as {
     error?: string;

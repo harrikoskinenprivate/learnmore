@@ -32,6 +32,7 @@ import type {
   ArchiveCursor,
   AssignmentMediaItem,
   FormState,
+  ResponseDocument,
   LinkedAssignment,
   MediaKind,
   ResponseKind,
@@ -54,21 +55,55 @@ import {
 
 const MAX_LINKS = 15;
 const parentAssignment = alias(assignments, "parent_assignment");
+const responseDocument = alias(assignmentMedia, "response_document");
 
-function isResponseKind(value: string): value is ResponseKind {
-  return value === "text" || value === "image" || value === "video" || value === "audio";
+function asAttachment(value: MediaKind | "file" | null): MediaKind | null {
+  if (value === "image" || value === "video" || value === "audio") {
+    return value;
+  }
+  return null;
+}
+
+function parseAttachmentKind(value: string): MediaKind | null | "invalid" {
+  if (!value) {
+    return null;
+  }
+  if (value === "image" || value === "video" || value === "audio") {
+    return value;
+  }
+  return "invalid";
 }
 
 function readyMedia(row: {
   mediaId: string | null;
-  kind: MediaKind | null;
+  kind: MediaKind | "file" | null;
   mime: string | null;
   status: "pending" | "ready" | null;
 } | undefined): AssignmentMediaItem | null {
-  if (!row?.mediaId || row.status !== "ready" || !row.kind || !row.mime) {
+  if (!row?.mediaId || row.status !== "ready" || !row.kind || !row.mime || row.kind === "file") {
     return null;
   }
   return { id: row.mediaId, kind: row.kind, mime: row.mime };
+}
+
+function readyDocument(
+  row:
+    | {
+        documentId: string | null;
+        documentName: string | null;
+        documentMime: string | null;
+        documentStatus: "pending" | "ready" | null;
+      }
+    | undefined,
+): ResponseDocument | null {
+  if (!row?.documentId || row.documentStatus !== "ready" || !row.documentMime) {
+    return null;
+  }
+  return {
+    id: row.documentId,
+    name: row.documentName || "tiedosto",
+    mime: row.documentMime,
+  };
 }
 
 export type AssignmentLinkInput = { title: string; url: string };
@@ -200,9 +235,11 @@ export async function listStudentAssignments(): Promise<StudentAssignmentListIte
         assignmentId: assignmentResponses.assignmentId,
         body: assignmentResponses.body,
         status: assignmentMedia.status,
+        documentStatus: responseDocument.status,
       })
       .from(assignmentResponses)
       .leftJoin(assignmentMedia, eq(assignmentMedia.id, assignmentResponses.mediaId))
+      .leftJoin(responseDocument, eq(responseDocument.id, assignmentResponses.documentId))
       .where(eq(assignmentResponses.studentId, user.id)),
   ]);
 
@@ -210,7 +247,11 @@ export async function listStudentAssignments(): Promise<StudentAssignmentListIte
     drafts.filter((row) => row.body.trim().length > 0).map((row) => row.assignmentId),
   );
   for (const response of responses) {
-    if (response.body.trim().length > 0 || response.status === "ready") {
+    if (
+      response.body.trim().length > 0 ||
+      response.status === "ready" ||
+      response.documentStatus === "ready"
+    ) {
       draftIds.add(response.assignmentId);
     }
   }
@@ -372,9 +413,11 @@ async function draftIdsForStudent(studentId: string, assignmentIds: string[]): P
         assignmentId: assignmentResponses.assignmentId,
         body: assignmentResponses.body,
         status: assignmentMedia.status,
+        documentStatus: responseDocument.status,
       })
       .from(assignmentResponses)
       .leftJoin(assignmentMedia, eq(assignmentMedia.id, assignmentResponses.mediaId))
+      .leftJoin(responseDocument, eq(responseDocument.id, assignmentResponses.documentId))
       .where(
         and(
           eq(assignmentResponses.studentId, studentId),
@@ -387,7 +430,11 @@ async function draftIdsForStudent(studentId: string, assignmentIds: string[]): P
     drafts.filter((row) => row.body.trim().length > 0).map((row) => row.assignmentId),
   );
   for (const response of responses) {
-    if (response.body.trim().length > 0 || response.status === "ready") {
+    if (
+      response.body.trim().length > 0 ||
+      response.status === "ready" ||
+      response.documentStatus === "ready"
+    ) {
       draftIds.add(response.assignmentId);
     }
   }
@@ -408,6 +455,7 @@ export async function getTeacherAssignment(id: string): Promise<TeacherAssignmen
       status: assignments.status,
       archivedAt: assignments.archivedAt,
       responseKind: assignments.responseKind,
+      attachmentKind: assignments.attachmentKind,
       parentAssignmentId: assignments.parentAssignmentId,
       deadline: assignments.deadline,
       createdAt: assignments.createdAt,
@@ -467,9 +515,14 @@ export async function getTeacherAssignment(id: string): Promise<TeacherAssignmen
         kind: assignmentMedia.kind,
         mime: assignmentMedia.mime,
         status: assignmentMedia.status,
+        documentId: responseDocument.id,
+        documentName: responseDocument.fileName,
+        documentMime: responseDocument.mime,
+        documentStatus: responseDocument.status,
       })
       .from(assignmentResponses)
       .leftJoin(assignmentMedia, eq(assignmentMedia.id, assignmentResponses.mediaId))
+      .leftJoin(responseDocument, eq(responseDocument.id, assignmentResponses.documentId))
       .where(eq(assignmentResponses.assignmentId, id)),
   ]);
 
@@ -480,6 +533,7 @@ export async function getTeacherAssignment(id: string): Promise<TeacherAssignmen
 
   return {
     ...assignment,
+    attachmentKind: asAttachment(assignment.attachmentKind),
     parent: context.parent,
     feedback: context.feedback,
     links,
@@ -500,13 +554,13 @@ export async function getTeacherAssignment(id: string): Promise<TeacherAssignmen
                 )?.body ?? "",
             }))
           : [],
-      response:
-        student.returnedAt && assignment.responseKind
-          ? {
-              body: responseByStudent.get(student.id)?.body ?? "",
-              media: readyMedia(responseByStudent.get(student.id)),
-            }
-          : null,
+      response: student.returnedAt
+        ? {
+            body: responseByStudent.get(student.id)?.body ?? "",
+            media: assignment.responseKind ? readyMedia(responseByStudent.get(student.id)) : null,
+            document: readyDocument(responseByStudent.get(student.id)),
+          }
+        : null,
     })),
   };
 }
@@ -543,6 +597,7 @@ export async function getStudentAssignment(id: string): Promise<StudentAssignmen
       archivedAt: assignments.archivedAt,
       deadline: assignments.deadline,
       responseKind: assignments.responseKind,
+      attachmentKind: assignments.attachmentKind,
       parentAssignmentId: assignments.parentAssignmentId,
       id: assignments.id,
       title: assignments.title,
@@ -597,9 +652,14 @@ export async function getStudentAssignment(id: string): Promise<StudentAssignmen
         kind: assignmentMedia.kind,
         mime: assignmentMedia.mime,
         status: assignmentMedia.status,
+        documentId: responseDocument.id,
+        documentName: responseDocument.fileName,
+        documentMime: responseDocument.mime,
+        documentStatus: responseDocument.status,
       })
       .from(assignmentResponses)
       .leftJoin(assignmentMedia, eq(assignmentMedia.id, assignmentResponses.mediaId))
+      .leftJoin(responseDocument, eq(responseDocument.id, assignmentResponses.documentId))
       .where(
         and(
           eq(assignmentResponses.assignmentId, id),
@@ -614,12 +674,15 @@ export async function getStudentAssignment(id: string): Promise<StudentAssignmen
   const response: StoredResponse = {
     body: responseRows[0]?.body ?? "",
     media: readyMedia(responseRows[0]),
+    document: readyDocument(responseRows[0]),
   };
   const hasQuestionDraft = [...answerByQuestion.values()].some((body) => body.trim().length > 0);
   const hasTypedDraft =
     assignment.responseKind === "text"
-      ? response.body.trim().length > 0
-      : response.media !== null;
+      ? response.body.trim().length > 0 ||
+        response.document !== null ||
+        (assignment.attachmentKind !== null && response.media !== null)
+      : response.media !== null || response.document !== null;
 
   return {
     id: assignment.id,
@@ -629,6 +692,7 @@ export async function getStudentAssignment(id: string): Promise<StudentAssignmen
     links,
     media,
     responseKind: assignment.responseKind,
+    attachmentKind: asAttachment(assignment.attachmentKind),
     parent: context.parent,
     feedback: context.feedback,
     questions: questions.map((question) => ({
@@ -636,7 +700,9 @@ export async function getStudentAssignment(id: string): Promise<StudentAssignmen
       answer: answerByQuestion.get(question.id) ?? "",
     })),
     response,
-    hasDraft: assignment.responseKind ? hasTypedDraft : hasQuestionDraft,
+    hasDraft: assignment.responseKind
+      ? hasTypedDraft
+      : hasQuestionDraft || response.document !== null,
     returnedAt: assignment.returnedAt,
     reviewedAt: assignment.reviewedAt,
     archivedAt: assignment.archivedAt,
@@ -648,7 +714,7 @@ export async function createAssignment(input: {
   title: string;
   instructions: string;
   links: AssignmentLinkInput[];
-  responseKind: string;
+  attachmentKind: string;
   studentIds: string[];
   mediaIds: string[];
   deadline: string;
@@ -689,10 +755,10 @@ export async function createAssignment(input: {
     return { error: "Linkkejä voi olla enintään 15." };
   }
 
-  if (!isResponseKind(input.responseKind)) {
-    return { error: "Valitse palautustapa." };
+  const attachmentKind = parseAttachmentKind(input.attachmentKind);
+  if (attachmentKind === "invalid") {
+    return { error: "Valitse liite." };
   }
-  const responseKind = input.responseKind;
 
   const deadline = parseDeadlineInput(input.deadline);
   if (deadline === "invalid") {
@@ -744,7 +810,8 @@ export async function createAssignment(input: {
       instructions,
       createdBy: teacher.id,
       status: input.publish ? "published" : "draft",
-      responseKind,
+      responseKind: "text",
+      attachmentKind,
       parentAssignmentId: parentAssignmentId || null,
       deadline,
     });
@@ -927,6 +994,7 @@ export async function returnAssignment(input: {
   const rows = await db
     .select({
       responseKind: assignments.responseKind,
+      attachmentKind: assignments.attachmentKind,
       archivedAt: assignments.archivedAt,
     })
     .from(assignmentStudents)
@@ -956,15 +1024,6 @@ export async function returnAssignment(input: {
   const draft = await saveDraft(input);
   if (draft.error) {
     return draft;
-  }
-
-  const saved = await db
-    .select({ body: answers.body })
-    .from(answers)
-    .where(and(eq(answers.assignmentId, input.assignmentId), eq(answers.studentId, user.id)));
-
-  if (!saved.some((row) => row.body.trim().length > 0)) {
-    return { error: "Kirjoita vastaus ennen palautusta." };
   }
 
   const updated = await db
@@ -1013,8 +1072,24 @@ async function returnText(studentId: string, assignmentId: string, body: string)
         target: [assignmentResponses.assignmentId, assignmentResponses.studentId],
         set: { body, updatedAt: now },
       });
-    if (body.trim().length < 1) {
-      return { error: "Kirjoita vastaus ennen palautusta." };
+    if (open.attachmentKind) {
+      const media = await tx
+        .select({ id: assignmentMedia.id })
+        .from(assignmentResponses)
+        .innerJoin(assignmentMedia, eq(assignmentMedia.id, assignmentResponses.mediaId))
+        .where(
+          and(
+            eq(assignmentResponses.assignmentId, assignmentId),
+            eq(assignmentResponses.studentId, studentId),
+            eq(assignmentMedia.status, "ready"),
+            eq(assignmentMedia.kind, open.attachmentKind),
+            eq(assignmentMedia.studentId, studentId),
+          ),
+        )
+        .limit(1);
+      if (!media[0]) {
+        return { error: missingMediaMessage(open.attachmentKind) };
+      }
     }
     await tx
       .update(assignmentStudents)
@@ -1091,7 +1166,12 @@ async function lockOpenResponse(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   assignmentId: string,
   studentId: string,
-): Promise<{ responseKind: ResponseKind | null } | "missing" | "returned" | "archived"> {
+): Promise<
+  | { responseKind: ResponseKind | null; attachmentKind: MediaKind | null }
+  | "missing"
+  | "returned"
+  | "archived"
+> {
   await tx.execute(sql`
     SELECT returned_at
     FROM assignment_students
@@ -1101,6 +1181,7 @@ async function lockOpenResponse(
   const rows = await tx
     .select({
       responseKind: assignments.responseKind,
+      attachmentKind: assignments.attachmentKind,
       returnedAt: assignmentStudents.returnedAt,
       archivedAt: assignments.archivedAt,
     })
@@ -1124,7 +1205,7 @@ async function lockOpenResponse(
   if (row.returnedAt) {
     return "returned";
   }
-  return { responseKind: row.responseKind };
+  return { responseKind: row.responseKind, attachmentKind: asAttachment(row.attachmentKind) };
 }
 
 export async function setDraftInstructionVideo(input: {

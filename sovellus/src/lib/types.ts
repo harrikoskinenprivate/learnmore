@@ -62,6 +62,7 @@ export type ResponseKind = "text" | "image" | "video" | "audio";
 export type StoredResponse = {
   body: string;
   media: AssignmentMediaItem | null;
+  document: ResponseDocument | null;
 };
 
 export type LinkedAssignment = {
@@ -107,6 +108,12 @@ export type StudentAssignmentListItem = {
 
 export type MediaKind = "image" | "video" | "audio";
 
+export type ResponseDocument = {
+  id: string;
+  name: string;
+  mime: string;
+};
+
 export type AssignmentMediaItem = {
   id: string;
   kind: MediaKind;
@@ -130,6 +137,7 @@ export type TeacherAssignmentDetail = {
   links: AssignmentLinkItem[];
   media: AssignmentMediaItem[];
   responseKind: ResponseKind | null;
+  attachmentKind: MediaKind | null;
   parent: { id: string; title: string } | null;
   feedback: LinkedAssignment[];
   questions: { id: string; prompt: string }[];
@@ -152,6 +160,7 @@ export type StudentAssignmentDetail = {
   links: AssignmentLinkItem[];
   media: AssignmentMediaItem[];
   responseKind: ResponseKind | null;
+  attachmentKind: MediaKind | null;
   parent: { id: string; title: string } | null;
   feedback: LinkedAssignment[];
   questions: { id: string; prompt: string; answer: string }[];

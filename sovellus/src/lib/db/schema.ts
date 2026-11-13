@@ -15,7 +15,7 @@ import {
 export const userRole = pgEnum("user_role", ["teacher", "student"]);
 export const assignmentStatus = pgEnum("assignment_status", ["draft", "published"]);
 export const responseKind = pgEnum("response_kind", ["text", "image", "video", "audio"]);
-export const mediaKind = pgEnum("media_kind", ["image", "video", "audio"]);
+export const mediaKind = pgEnum("media_kind", ["image", "video", "audio", "file"]);
 export const mediaStatus = pgEnum("media_status", ["pending", "ready"]);
 
 export const users = pgTable("users", {
@@ -64,6 +64,7 @@ export const assignments = pgTable("assignments", {
     .references(() => users.id),
   status: assignmentStatus("status").notNull().default("draft"),
   responseKind: responseKind("response_kind"),
+  attachmentKind: mediaKind("attachment_kind"),
   parentAssignmentId: uuid("parent_assignment_id").references((): AnyPgColumn => assignments.id, {
     onDelete: "cascade",
   }),
@@ -141,6 +142,7 @@ export const assignmentMedia = pgTable(
     status: mediaStatus("status").notNull().default("pending"),
     objectKey: text("object_key").notNull().unique(),
     mime: text("mime").notNull(),
+    fileName: text("file_name"),
     byteSize: integer("byte_size").notNull(),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -163,11 +165,13 @@ export const assignmentResponses = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     body: text("body").notNull().default(""),
     mediaId: uuid("media_id").references(() => assignmentMedia.id, { onDelete: "set null" }),
+    documentId: uuid("document_id").references(() => assignmentMedia.id, { onDelete: "set null" }),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     primaryKey({ columns: [table.assignmentId, table.studentId] }),
     index("assignment_responses_media_id_idx").on(table.mediaId),
+    index("assignment_responses_document_id_idx").on(table.documentId),
   ],
 );
 

@@ -10,7 +10,7 @@ import { DraftVideoForm } from "@/components/draft-video-form";
 import { DraftForm } from "@/components/draft-form";
 import { PublishAssignmentForm } from "@/components/publish-assignment-form";
 import { ResponseForm } from "@/components/response-form";
-import { ResponseView } from "@/components/response-view";
+import { ResponseDocumentLink, ResponseView } from "@/components/response-view";
 import { ReviewReturnForm } from "@/components/review-return-form";
 import { assignmentStateLabel, responseKindLabel, teacherWorkLabel } from "@/lib/assignment-labels";
 import { getFeedbackTarget, getStudentAssignment, getTeacherAssignment } from "@/lib/assignments";
@@ -72,7 +72,7 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
               {assignmentStateLabel(assignment)} ·{" "}
               {formatFiDate(assignment.createdAt)}
               {assignment.responseKind
-                ? ` · Palautus: ${responseKindLabel(assignment.responseKind)}`
+                ? ` · Palautus: ${responseKindLabel(assignment.responseKind, assignment.attachmentKind)}`
                 : ""}
               {assignment.deadline ? ` · Määräaika ${formatDeadline(assignment.deadline)}` : ""}
             </p>
@@ -153,21 +153,29 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
                       <div className="mt-3">
                         <ResponseView
                           kind={assignment.responseKind}
-                          response={student.response ?? { body: "", media: null }}
+                          attachment={assignment.attachmentKind}
+                          response={student.response ?? { body: "", media: null, document: null }}
                         />
                       </div>
                     ) : null}
                     {student.returnedAt && !assignment.responseKind ? (
-                      <ol className="mt-3 grid list-decimal gap-2 pl-5">
-                        {student.answers.map((answer) => (
-                          <li key={answer.questionId}>
-                            <p>{answer.prompt}</p>
-                            <p className="whitespace-pre-wrap text-muted">
-                              {answer.body.trim() || "Tyhjä vastaus"}
-                            </p>
-                          </li>
-                        ))}
-                      </ol>
+                      <>
+                        <ol className="mt-3 grid list-decimal gap-2 pl-5">
+                          {student.answers.map((answer) => (
+                            <li key={answer.questionId}>
+                              <p>{answer.prompt}</p>
+                              <p className="whitespace-pre-wrap text-muted">
+                                {answer.body.trim() || "Tyhjä vastaus"}
+                              </p>
+                            </li>
+                          ))}
+                        </ol>
+                        {student.response?.document ? (
+                          <div className="mt-3">
+                            <ResponseDocumentLink document={student.response.document} />
+                          </div>
+                        ) : null}
+                      </>
                     ) : null}
                     {student.returnedAt ? (
                       <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -248,7 +256,7 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
                 ? "Luonnos tallennettu"
                 : "Aloittamatta"}
             {assignment.responseKind
-              ? ` · Palautus: ${responseKindLabel(assignment.responseKind)}`
+              ? ` · Palautus: ${responseKindLabel(assignment.responseKind, assignment.attachmentKind)}`
               : ""}
             {assignment.deadline ? ` · Määräaika ${formatDeadline(assignment.deadline)}` : ""}
             {assignment.late ? " · Myöhässä" : ""}
@@ -294,28 +302,45 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
             <p className="mb-4 font-medium text-danger">Myöhässä. Voit silti vastata.</p>
           ) : null}
           {assignment.returnedAt && assignment.responseKind ? (
-            <ResponseView kind={assignment.responseKind} response={assignment.response} />
+            <ResponseView
+              kind={assignment.responseKind}
+              attachment={assignment.attachmentKind}
+              response={assignment.response}
+            />
           ) : null}
           {assignment.returnedAt && !assignment.responseKind ? (
-            <ol className="grid list-decimal gap-3 pl-5">
-              {assignment.questions.map((question) => (
-                <li key={question.id}>
-                  <p className="font-medium">{question.prompt}</p>
-                  <p className="mt-1 whitespace-pre-wrap">{question.answer.trim() || "Tyhjä vastaus"}</p>
-                </li>
-              ))}
-            </ol>
+            <>
+              <ol className="grid list-decimal gap-3 pl-5">
+                {assignment.questions.map((question) => (
+                  <li key={question.id}>
+                    <p className="font-medium">{question.prompt}</p>
+                    <p className="mt-1 whitespace-pre-wrap">
+                      {question.answer.trim() || "Tyhjä vastaus"}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+              {assignment.response.document ? (
+                <ResponseDocumentLink document={assignment.response.document} />
+              ) : null}
+            </>
           ) : null}
           {!assignment.returnedAt && !assignment.archivedAt && assignment.responseKind ? (
             <ResponseForm
               assignmentId={assignment.id}
               kind={assignment.responseKind}
+              attachment={assignment.attachmentKind}
               initialBody={assignment.response.body}
               initialMedia={assignment.response.media}
+              initialDocument={assignment.response.document}
             />
           ) : null}
           {!assignment.returnedAt && !assignment.archivedAt && !assignment.responseKind ? (
-            <DraftForm assignmentId={assignment.id} questions={assignment.questions} />
+            <DraftForm
+              assignmentId={assignment.id}
+              questions={assignment.questions}
+              initialDocument={assignment.response.document}
+            />
           ) : null}
         </section>
         {assignment.feedback.length > 0 ? (

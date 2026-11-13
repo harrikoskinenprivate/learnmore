@@ -15,8 +15,20 @@ export function withFeedback(parentTitle: string | null, meta: string): string {
   return `Palaute tehtävään ${parentTitle} · ${meta}`;
 }
 
-export function responseKindLabel(kind: "text" | "image" | "video" | "audio"): string {
+export function responseKindLabel(
+  kind: "text" | "image" | "video" | "audio",
+  attachment?: "image" | "video" | "audio" | null,
+): string {
   if (kind === "text") {
+    if (attachment === "image") {
+      return "Tekstikenttä ja kuva";
+    }
+    if (attachment === "video") {
+      return "Tekstikenttä ja video";
+    }
+    if (attachment === "audio") {
+      return "Tekstikenttä ja äänite";
+    }
     return "Tekstikenttä";
   }
   if (kind === "image") {

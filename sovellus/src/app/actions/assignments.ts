@@ -33,7 +33,7 @@ export async function addAssignment(
     title: String(formData.get("title") ?? ""),
     instructions: String(formData.get("instructions") ?? ""),
     links,
-    responseKind: String(formData.get("responseKind") ?? ""),
+    attachmentKind: String(formData.get("attachmentKind") ?? ""),
     studentIds: formData.getAll("studentId").map((value) => String(value)),
     mediaIds: formData.getAll("mediaId").map((value) => String(value)),
     deadline: String(formData.get("deadline") ?? ""),

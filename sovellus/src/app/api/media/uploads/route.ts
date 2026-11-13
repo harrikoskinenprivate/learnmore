@@ -7,6 +7,7 @@ export async function POST(request: Request) {
       mime?: unknown;
       byteSize?: unknown;
       assignmentId?: unknown;
+      fileName?: unknown;
     };
     const assignmentId = typeof body.assignmentId === "string" ? body.assignmentId : "";
     const result = await createUpload({
@@ -14,6 +15,7 @@ export async function POST(request: Request) {
       mime: String(body.mime ?? ""),
       byteSize: Number(body.byteSize),
       assignmentId: assignmentId || undefined,
+      fileName: typeof body.fileName === "string" ? body.fileName : "",
     });
     return Response.json(result);
   } catch (error) {

@@ -1,5 +1,15 @@
 # Muutosloki
 
+## 13.11.2026
+
+Tekstikenttä ja tiedoston lataus eivät ole pakollisia palautuksessa. Oppilas voi palauttaa tehtävän tyhjänä. Jos opettaja on valinnut kuvan, videon tai äänitteen, se vaaditaan yhä. Vanha kuva-, video- tai äänitehtävä vaatii yhä oman mediansa.
+
+## 11.11.2026
+
+Next.js ja `eslint-config-next` päivitettiin versiosta 16.4.0 versioon 16.4.6. Käynnistys varoitti 16.4.0:n tunnetusta haavoittuvuudesta. 16.4.6 sisältää lokakuun ja marraskuun tietoturvakorjaukset.
+
+Uudessa tehtävässä palautus on aina tekstikenttä. Opettaja voi lisäksi valita yhden liitteen: ei liitettä, kuva, video tai äänite. Oppilas näkee tekstikentän ja valitun liitteen. Palautus vaatii tekstin tai tiedoston, ja jos liite on valittu, myös valmiin kuvan, videon tai äänitteen. Tekstin rinnalle voi kaikissa tehtävissä ladata minkä tahansa tiedoston laitteelta, esimerkiksi Word-asiakirjan, enintään 25 Mt. Uusi tiedosto korvaa edellisen. Aiemmat kuva-, video- ja äänitehtävät vaativat yhä oman mediansa, mutta niihinkin voi lisätä tiedoston. Migraatiot ovat `sovellus/drizzle/0011_text_and_attachment.sql` ja `sovellus/drizzle/0012_response_document.sql`.
+
 ## 24.10.2026
 
 Opettajan Tehtävät-sivulla Uusi tehtävä -tekstipainike on vaihdettu plus-painikkeeksi. Se on samankokoinen ja -värinen kuin oppilaan lisäyksen plus-painike, ja se avaa uuden tehtävän lomakkeen. Ruudunlukijalle nimi on edelleen Uusi tehtävä.

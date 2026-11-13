@@ -19,6 +19,13 @@ export async function GET(
       "cache-control": "private, no-store",
       "x-content-type-options": "nosniff",
     });
+    if (opened.fileName) {
+      const name = opened.fileName.replace(/[^\x20-\x7e]/g, "_").replace(/[";\\]/g, "_");
+      headers.set(
+        "content-disposition",
+        `attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(opened.fileName)}`,
+      );
+    }
 
     const range = request.headers.get("range");
     if (!range) {

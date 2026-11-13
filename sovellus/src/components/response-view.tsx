@@ -1,21 +1,60 @@
-import type { AssignmentMediaItem, ResponseKind, StoredResponse } from "@/lib/types";
+import type {
+  AssignmentMediaItem,
+  MediaKind,
+  ResponseDocument,
+  ResponseKind,
+  StoredResponse,
+} from "@/lib/types";
 
 export function ResponseView({
   kind,
+  attachment = null,
   response,
 }: {
   kind: ResponseKind;
+  attachment?: MediaKind | null;
   response: StoredResponse;
 }) {
   if (kind === "text") {
     return (
-      <p className="whitespace-pre-wrap">{response.body.trim() || "Tyhjä vastaus"}</p>
+      <div className="grid gap-4">
+        {response.body.trim() ? (
+          <p className="whitespace-pre-wrap">{response.body.trim()}</p>
+        ) : null}
+        {response.document ? <ResponseDocumentLink document={response.document} /> : null}
+        {!response.body.trim() && !response.document ? (
+          <p className="whitespace-pre-wrap">Tyhjä vastaus</p>
+        ) : null}
+        {attachment ? (
+          response.media ? (
+            <ResponseMedia kind={response.media.kind} media={response.media} />
+          ) : (
+            <p className="text-muted">Tiedosto puuttuu.</p>
+          )
+        ) : null}
+      </div>
     );
   }
-  if (!response.media) {
-    return <p className="text-muted">Tiedosto puuttuu.</p>;
-  }
-  return <ResponseMedia kind={kind} media={response.media} />;
+  return (
+    <div className="grid gap-4">
+      {response.document ? <ResponseDocumentLink document={response.document} /> : null}
+      {response.media ? (
+        <ResponseMedia kind={kind} media={response.media} />
+      ) : (
+        <p className="text-muted">Tiedosto puuttuu.</p>
+      )}
+    </div>
+  );
+}
+
+export function ResponseDocumentLink({ document }: { document: ResponseDocument }) {
+  return (
+    <p>
+      <a href={`/api/media/${document.id}`} className="text-pine underline">
+        {document.name}
+      </a>
+    </p>
+  );
 }
 
 export function ResponseMedia({

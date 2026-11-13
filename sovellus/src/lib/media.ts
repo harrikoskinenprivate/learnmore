@@ -27,6 +27,7 @@ export const MAX_IMAGES = 8;
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 150 * 1024 * 1024;
 export const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 export const MAX_VIDEO_SECONDS = 180;
 
 const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -59,17 +60,22 @@ function storeKind(): "local" | "gcs" {
   return process.env.MEDIA_STORE === "gcs" ? "gcs" : "local";
 }
 
-function maxBytes(kind: MediaKind): number {
+type StoredKind = MediaKind | "file";
+
+function maxBytes(kind: StoredKind): number {
   if (kind === "image") {
     return MAX_IMAGE_BYTES;
   }
-  if (kind === "audio") {
-    return MAX_AUDIO_BYTES;
+  if (kind === "audio" || kind === "file") {
+    return kind === "file" ? MAX_FILE_BYTES : MAX_AUDIO_BYTES;
   }
   return MAX_VIDEO_BYTES;
 }
 
-function allowedMime(kind: MediaKind, mime: string): boolean {
+function allowedMime(kind: StoredKind, mime: string): boolean {
+  if (kind === "file") {
+    return mime.length > 0 && mime.length <= 200 && !/[\r\n]/.test(mime);
+  }
   if (kind === "image") {
     return IMAGE_MIMES.has(mime);
   }
@@ -79,13 +85,26 @@ function allowedMime(kind: MediaKind, mime: string): boolean {
   return VIDEO_MIMES.has(mime);
 }
 
-function objectKeyFor(kind: MediaKind, id: string): string {
-  const folder = kind === "image" ? "images" : kind === "audio" ? "audio" : "videos";
+function objectKeyFor(kind: StoredKind, id: string): string {
+  const folder =
+    kind === "image" ? "images" : kind === "audio" ? "audio" : kind === "file" ? "files" : "videos";
   return `${folder}/${id}`;
 }
 
+function safeFileName(value: string): string {
+  const base = value.replace(/\\/g, "/").split("/").pop() ?? "";
+  const cleaned = base.replace(/[\u0000-\u001f\u007f"]/g, "").trim().slice(0, 200);
+  return cleaned || "tiedosto";
+}
+
+function contentDisposition(fileName: string | null): string {
+  const name = safeFileName(fileName ?? "");
+  const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/[";\\]/g, "_");
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
 function localPath(objectKey: string): string {
-  if (!/^(images|videos|audio)\/[0-9a-f-]{36}$/i.test(objectKey)) {
+  if (!/^(images|videos|audio|files)\/[0-9a-f-]{36}$/i.test(objectKey)) {
     throw new MediaError("Tiedostoa ei löydy.", 404);
   }
   return path.join(process.cwd(), "data", "media", objectKey);
@@ -128,6 +147,7 @@ export async function createUpload(input: {
   mime: string;
   byteSize: number;
   assignmentId?: string;
+  fileName?: string;
 }): Promise<{
   id: string;
   uploadUrl: string;
@@ -140,7 +160,7 @@ export async function createUpload(input: {
 
   const teacher = await requireTeacherUser();
   const kind = checkedKind(input.kind, input.mime, input.byteSize);
-  if (kind.kind === "audio") {
+  if (kind.kind === "audio" || kind.kind === "file") {
     throw new MediaError("Tiedoston tyyppi ei kelpaa.", 400);
   }
   const id = randomUUID();
@@ -163,19 +183,21 @@ function checkedKind(
   rawKind: string,
   rawMime: string,
   byteSize: number,
-): { kind: MediaKind; mime: string } {
-  if (rawKind !== "image" && rawKind !== "video" && rawKind !== "audio") {
+): { kind: StoredKind; mime: string } {
+  if (rawKind !== "image" && rawKind !== "video" && rawKind !== "audio" && rawKind !== "file") {
     throw new MediaError("Tiedoston tyyppi ei kelpaa.", 400);
   }
   const kind = rawKind;
-  const mime = rawMime.trim().toLowerCase();
+  const mime = rawMime.trim().toLowerCase() || (kind === "file" ? "application/octet-stream" : "");
   if (!allowedMime(kind, mime)) {
     throw new MediaError(
       kind === "image"
         ? "Kuva saa olla jpeg, png tai webp."
         : kind === "video"
           ? "Video saa olla mp4 tai webm."
-          : "Äänite saa olla webm, mp4, mpeg, aac tai wav.",
+          : kind === "file"
+            ? "Tiedoston tyyppi ei kelpaa."
+            : "Äänite saa olla webm, mp4, mpeg, aac tai wav.",
       400,
     );
   }
@@ -185,11 +207,23 @@ function checkedKind(
   return { kind, mime };
 }
 
+function studentMediaAllowed(
+  responseKind: "text" | "image" | "video" | "audio" | null,
+  attachmentKind: MediaKind | null,
+  kind: MediaKind,
+): boolean {
+  if (responseKind === kind) {
+    return true;
+  }
+  return responseKind === "text" && attachmentKind === kind;
+}
+
 async function createResponseUpload(input: {
   kind: string;
   mime: string;
   byteSize: number;
   assignmentId?: string;
+  fileName?: string;
 }): Promise<{
   id: string;
   uploadUrl: string;
@@ -208,6 +242,7 @@ async function createResponseUpload(input: {
   const rows = await db
     .select({
       responseKind: assignments.responseKind,
+      attachmentKind: assignments.attachmentKind,
       returnedAt: assignmentStudents.returnedAt,
       archivedAt: assignments.archivedAt,
     })
@@ -222,7 +257,17 @@ async function createResponseUpload(input: {
     )
     .limit(1);
   const assignment = rows[0];
-  if (!assignment || assignment.responseKind !== kind.kind) {
+  const attachmentKind =
+    assignment?.attachmentKind === "image" ||
+    assignment?.attachmentKind === "video" ||
+    assignment?.attachmentKind === "audio"
+      ? assignment.attachmentKind
+      : null;
+  if (
+    !assignment ||
+    (kind.kind !== "file" &&
+      !studentMediaAllowed(assignment.responseKind, attachmentKind, kind.kind))
+  ) {
     throw new MediaError("Tehtävää ei löydy.", 404);
   }
   if (assignment.archivedAt) {
@@ -243,6 +288,7 @@ async function createResponseUpload(input: {
     status: "pending",
     objectKey,
     mime: kind.mime,
+    fileName: kind.kind === "file" ? safeFileName(input.fileName ?? "") : null,
     byteSize: input.byteSize,
     sortOrder: 0,
   });
@@ -376,6 +422,7 @@ async function attachStudentResponse(row: MediaRow): Promise<void> {
     const rows = await tx
       .select({
         responseKind: assignments.responseKind,
+        attachmentKind: assignments.attachmentKind,
         returnedAt: assignmentStudents.returnedAt,
       })
       .from(assignmentStudents)
@@ -389,7 +436,17 @@ async function attachStudentResponse(row: MediaRow): Promise<void> {
       )
       .limit(1);
     const assignment = rows[0];
-    if (!assignment || assignment.responseKind !== row.kind) {
+    const attachmentKind =
+      assignment?.attachmentKind === "image" ||
+      assignment?.attachmentKind === "video" ||
+      assignment?.attachmentKind === "audio"
+        ? assignment.attachmentKind
+        : null;
+    if (
+      !assignment ||
+      (row.kind !== "file" &&
+        !studentMediaAllowed(assignment.responseKind, attachmentKind, row.kind))
+    ) {
       throw new MediaError("Tehtävää ei löydy.", 404);
     }
     if (assignment.returnedAt) {
@@ -401,23 +458,42 @@ async function attachStudentResponse(row: MediaRow): Promise<void> {
       .set({ status: "ready" })
       .where(eq(assignmentMedia.id, row.id));
     const now = new Date();
-    await tx
-      .insert(assignmentResponses)
-      .values({
-        assignmentId,
-        studentId,
-        body: "",
-        mediaId: row.id,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [assignmentResponses.assignmentId, assignmentResponses.studentId],
-        set: { mediaId: row.id, updatedAt: now },
-      });
+    if (row.kind === "file") {
+      await tx
+        .insert(assignmentResponses)
+        .values({
+          assignmentId,
+          studentId,
+          body: "",
+          documentId: row.id,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: [assignmentResponses.assignmentId, assignmentResponses.studentId],
+          set: { documentId: row.id, updatedAt: now },
+        });
+    } else {
+      await tx
+        .insert(assignmentResponses)
+        .values({
+          assignmentId,
+          studentId,
+          body: "",
+          mediaId: row.id,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: [assignmentResponses.assignmentId, assignmentResponses.studentId],
+          set: { mediaId: row.id, updatedAt: now },
+        });
+    }
   });
 
   const current = await db
-    .select({ mediaId: assignmentResponses.mediaId })
+    .select({
+      mediaId: assignmentResponses.mediaId,
+      documentId: assignmentResponses.documentId,
+    })
     .from(assignmentResponses)
     .where(
       and(
@@ -426,7 +502,7 @@ async function attachStudentResponse(row: MediaRow): Promise<void> {
       ),
     )
     .limit(1);
-  const keepId = current[0]?.mediaId;
+  const keepId = row.kind === "file" ? current[0]?.documentId : current[0]?.mediaId;
   if (!keepId) {
     return;
   }
@@ -438,6 +514,7 @@ async function attachStudentResponse(row: MediaRow): Promise<void> {
         eq(assignmentMedia.assignmentId, assignmentId),
         eq(assignmentMedia.studentId, studentId),
         ne(assignmentMedia.id, keepId),
+        row.kind === "file" ? eq(assignmentMedia.kind, "file") : ne(assignmentMedia.kind, "file"),
       ),
     );
   for (const other of others) {
@@ -527,7 +604,7 @@ export async function replaceDraftInstructionVideo(input: {
 }
 
 export async function listAssignmentMedia(assignmentId: string): Promise<AssignmentMediaItem[]> {
-  return db
+  const rows = await db
     .select({
       id: assignmentMedia.id,
       kind: assignmentMedia.kind,
@@ -542,6 +619,12 @@ export async function listAssignmentMedia(assignmentId: string): Promise<Assignm
       ),
     )
     .orderBy(asc(assignmentMedia.sortOrder));
+  return rows.flatMap((row) => {
+    if (row.kind === "file") {
+      return [];
+    }
+    return [{ id: row.id, kind: row.kind, mime: row.mime }];
+  });
 }
 
 export async function attachMedia(
@@ -612,7 +695,7 @@ export async function validateMediaSelection(
 }
 
 export async function openMedia(id: string): Promise<
-  | { kind: "local"; mime: string; size: number; filePath: string }
+  | { kind: "local"; mime: string; size: number; filePath: string; fileName: string | null }
   | { kind: "redirect"; url: string }
 > {
   const user = await getOptionalUser();
@@ -679,6 +762,7 @@ export async function openMedia(id: string): Promise<
       version: "v4",
       action: "read",
       expires: Date.now() + 15 * 60 * 1000,
+      ...(row.kind === "file" ? { responseDisposition: contentDisposition(row.fileName) } : {}),
     });
     return { kind: "redirect", url };
   }
@@ -688,7 +772,13 @@ export async function openMedia(id: string): Promise<
   if (!info) {
     throw new MediaError("Tiedostoa ei löydy.", 404);
   }
-  return { kind: "local", mime: row.mime, size: info.size, filePath };
+  return {
+    kind: "local",
+    mime: row.mime,
+    size: info.size,
+    filePath,
+    fileName: row.kind === "file" ? row.fileName : null,
+  };
 }
 
 export function localFileStream(filePath: string, start?: number, end?: number) {

@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 
 import { AppHeader } from "@/components/app-header";
-import { ResponseView } from "@/components/response-view";
+import { ResponseDocumentLink, ResponseView } from "@/components/response-view";
 import { ReviewReturnForm } from "@/components/review-return-form";
 import { assignmentStateLabel, teacherWorkLabel } from "@/lib/assignment-labels";
 import { getTeacherStudentWork } from "@/lib/assignments";
@@ -81,21 +81,29 @@ async function Work({
             <div className="mt-4">
               <ResponseView
                 kind={work.responseKind}
-                response={student.response ?? { body: "", media: null }}
+                attachment={work.attachmentKind}
+                response={student.response ?? { body: "", media: null, document: null }}
               />
             </div>
           ) : null}
           {student.returnedAt && !work.responseKind ? (
-            <ol className="mt-4 grid list-decimal gap-2 pl-5">
-              {student.answers.map((answer) => (
-                <li key={answer.questionId}>
-                  <p>{answer.prompt}</p>
-                  <p className="whitespace-pre-wrap text-muted">
-                    {answer.body.trim() || "Tyhjä vastaus"}
-                  </p>
-                </li>
-              ))}
-            </ol>
+            <>
+              <ol className="mt-4 grid list-decimal gap-2 pl-5">
+                {student.answers.map((answer) => (
+                  <li key={answer.questionId}>
+                    <p>{answer.prompt}</p>
+                    <p className="whitespace-pre-wrap text-muted">
+                      {answer.body.trim() || "Tyhjä vastaus"}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+              {student.response?.document ? (
+                <div className="mt-3">
+                  <ResponseDocumentLink document={student.response.document} />
+                </div>
+              ) : null}
+            </>
           ) : null}
           {student.returnedAt ? (
             <div className="mt-4 flex flex-wrap items-center gap-3">

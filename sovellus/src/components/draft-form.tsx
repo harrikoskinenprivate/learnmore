@@ -3,16 +3,19 @@
 import { useActionState, useState } from "react";
 
 import { saveAssignmentDraft } from "@/app/actions/assignments";
-import type { FormState } from "@/lib/types";
+import { DocumentControls } from "@/components/response-form";
+import type { FormState, ResponseDocument } from "@/lib/types";
 
 const initialState: FormState = {};
 
 export function DraftForm({
   assignmentId,
   questions,
+  initialDocument,
 }: {
   assignmentId: string;
   questions: { id: string; prompt: string; answer: string }[];
+  initialDocument: ResponseDocument | null;
 }) {
   const [state, action, pending] = useActionState(saveAssignmentDraft, initialState);
   const [answers, setAnswers] = useState<Record<string, string>>(() =>
@@ -43,6 +46,7 @@ export function DraftForm({
           />
         </div>
       ))}
+      <DocumentControls assignmentId={assignmentId} initialDocument={initialDocument} />
       {state.error ? (
         <p role="alert" className="text-sm text-danger">
           {state.error}
