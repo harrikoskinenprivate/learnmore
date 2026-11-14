@@ -8,7 +8,7 @@ export function AppHeader({ user }: { user: CurrentUser }) {
     <header className="flex flex-wrap items-center justify-between gap-4 border-b border-line pb-5">
       <div className="grid gap-2">
         <div>
-          <p className="text-sm text-muted">Oppimistehtävät</p>
+          <p className="text-sm text-muted">Blackboard</p>
           <p className="text-lg font-semibold">{user.name}</p>
         </div>
         {user.role === "teacher" ? (

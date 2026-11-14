@@ -26,7 +26,7 @@ async function LoginScreen() {
 
   return (
     <section className="rounded-lg border border-line bg-card p-6 shadow-sm">
-      <h1 className="text-2xl font-semibold tracking-tight">Oppimistehtävät</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Blackboard</h1>
       <p className="mt-2 mb-6 text-muted">
         Kirjaudu opettajan tunnuksella. Oppilas avaa opettajan lähettämän linkin.
       </p>

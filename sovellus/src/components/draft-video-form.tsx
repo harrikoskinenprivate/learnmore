@@ -6,8 +6,6 @@ import { saveDraftInstructionVideo } from "@/app/actions/assignments";
 import { InstructionVideoControls } from "@/components/media-fields";
 import type { AssignmentMediaItem } from "@/lib/types";
 
-const MAX_VIDEO_SECONDS = 180;
-
 export function DraftVideoForm({
   assignmentId,
   video,
@@ -63,15 +61,12 @@ export function DraftVideoForm({
       ) : null}
       <InstructionVideoControls
         disabled={busy}
-        onFile={(file, source) => {
+        onFile={(file) => {
           void (async () => {
             setBusy(true);
             setError("");
             setStatus("Lähetetään…");
             try {
-              if (source === "file") {
-                await assertDuration(file);
-              }
               const id = await uploadVideo(file);
               const result = await saveDraftInstructionVideo(assignmentId, id);
               if (result.error) {
@@ -130,46 +125,4 @@ async function uploadVideo(file: File): Promise<string> {
     throw new Error(failed.error ?? "Lähetys epäonnistui.");
   }
   return created.id;
-}
-
-function assertDuration(file: File): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const video = document.createElement("video");
-    let settled = false;
-    const finish = (duration: number) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      URL.revokeObjectURL(url);
-      if (!Number.isFinite(duration) || duration <= 0 || duration > MAX_VIDEO_SECONDS) {
-        reject(new Error("Ohjevideo saa olla enintään 3 minuuttia."));
-        return;
-      }
-      resolve();
-    };
-    video.preload = "metadata";
-    video.onloadedmetadata = () => {
-      if (Number.isFinite(video.duration)) {
-        finish(video.duration);
-        return;
-      }
-      video.currentTime = Number.MAX_SAFE_INTEGER;
-    };
-    video.ontimeupdate = () => {
-      if (Number.isFinite(video.duration)) {
-        finish(video.duration);
-      }
-    };
-    video.onerror = () => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      URL.revokeObjectURL(url);
-      reject(new Error("Videon kestoa ei voitu lukea."));
-    };
-    video.src = url;
-  });
 }

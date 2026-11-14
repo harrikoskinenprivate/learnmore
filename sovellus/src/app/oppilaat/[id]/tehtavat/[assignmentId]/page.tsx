@@ -82,7 +82,7 @@ async function Work({
               <ResponseView
                 kind={work.responseKind}
                 attachment={work.attachmentKind}
-                response={student.response ?? { body: "", media: null, document: null }}
+                response={student.response ?? { body: "", media: null, document: null, files: [] }}
               />
             </div>
           ) : null}

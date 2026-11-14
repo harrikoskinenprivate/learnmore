@@ -3,12 +3,10 @@
 import { useActionState, useState } from "react";
 
 import { addAssignment } from "@/app/actions/assignments";
-import { MediaFields } from "@/components/media-fields";
-import type { FormState, MediaKind } from "@/lib/types";
+import { AssignmentMaterialFields } from "@/components/media-fields";
+import type { FormState } from "@/lib/types";
 
 const initialState: FormState = {};
-
-type LinkRow = { title: string; url: string };
 
 export function CreateAssignmentForm({
   students,
@@ -22,19 +20,9 @@ export function CreateAssignmentForm({
   const [state, action, pending] = useActionState(addAssignment, initialState);
   const [title, setTitle] = useState("");
   const [instructions, setInstructions] = useState("");
-  const [links, setLinks] = useState<LinkRow[]>([{ title: "", url: "" }]);
-  const [attachment, setAttachment] = useState<MediaKind | "">("");
   const [selected, setSelected] = useState<string[]>(initialSelected);
   const [deadline, setDeadline] = useState("");
   const [mediaBusy, setMediaBusy] = useState(false);
-
-  function updateLink(index: number, field: keyof LinkRow, value: string) {
-    setLinks((current) =>
-      current.map((link, linkIndex) =>
-        linkIndex === index ? { ...link, [field]: value } : link,
-      ),
-    );
-  }
 
   return (
     <form action={action} className="grid gap-6">
@@ -54,98 +42,23 @@ export function CreateAssignmentForm({
           className="h-11 rounded-md border border-line bg-card px-3 text-base"
         />
       </div>
-      <div className="grid gap-1.5">
-        <label htmlFor="instructions" className="text-sm font-medium">
-          Ohje
-        </label>
-        <textarea
-          id="instructions"
-          name="instructions"
-          required
-          rows={5}
-          maxLength={4000}
-          value={instructions}
-          onChange={(event) => setInstructions(event.target.value)}
-          className="rounded-md border border-line bg-card px-3 py-2 text-base"
-        />
-      </div>
-
-      <fieldset className="grid gap-3">
-        <legend className="text-sm font-medium">Linkit dokumentteihin</legend>
-        <p className="text-sm text-muted">
-          Tallennetaan otsikko ja osoite. Itse dokumentti jää siihen palveluun, jossa se jo on.
-        </p>
-        {links.map((link, index) => (
-          <div key={index} className="grid gap-2 sm:grid-cols-[1fr_1.4fr_auto]">
-            <input
-              name="linkTitle"
-              type="text"
-              aria-label={`Linkin ${index + 1} otsikko`}
-              placeholder="Otsikko"
-              maxLength={120}
-              value={link.title}
-              onChange={(event) => updateLink(index, "title", event.target.value)}
-              className="h-11 rounded-md border border-line bg-card px-3 text-base"
-            />
-            <input
-              name="linkUrl"
-              type="url"
-              aria-label={`Linkin ${index + 1} osoite`}
-              placeholder="https://"
-              value={link.url}
-              onChange={(event) => updateLink(index, "url", event.target.value)}
-              className="h-11 rounded-md border border-line bg-card px-3 text-base"
-            />
-            <button
-              type="button"
-              className="h-11 rounded-md px-3 text-danger hover:bg-danger-bg"
-              onClick={() =>
-                setLinks((current) =>
-                  current.length === 1 ? [{ title: "", url: "" }] : current.filter((_, i) => i !== index),
-                )
-              }
-            >
-              Poista
-            </button>
-          </div>
-        ))}
-        <button
-          type="button"
-          className="h-11 justify-self-start rounded-md border border-line bg-card px-4 text-base"
-          onClick={() => setLinks((current) => [...current, { title: "", url: "" }])}
-        >
-          Lisää linkki
-        </button>
-      </fieldset>
-
-      <fieldset className="grid gap-2">
-        <legend className="text-sm font-medium">Oppilaan palautus</legend>
-        <p className="text-sm text-muted">
-          Palautuksessa on aina tekstikenttä. Voit lisäksi pyytää yhden liitteen.
-        </p>
-        {(
-          [
-            ["", "Ei liitettä"],
-            ["image", "Kuva"],
-            ["video", "Video"],
-            ["audio", "Äänite"],
-          ] as const
-        ).map(([value, label]) => (
-          <label key={label} className="flex min-h-11 items-center gap-3">
-            <input
-              type="radio"
-              name="attachmentKind"
-              value={value}
-              checked={attachment === value}
-              onChange={() => setAttachment(value)}
-              required
-            />
-            <span>{label}</span>
+      <AssignmentMaterialFields onBusyChange={setMediaBusy}>
+        <div className="grid gap-1.5">
+          <label htmlFor="instructions" className="text-sm font-medium">
+            Saateteksti
           </label>
-        ))}
-      </fieldset>
-
-      <MediaFields onBusyChange={setMediaBusy} />
+          <textarea
+            id="instructions"
+            name="instructions"
+            rows={4}
+            maxLength={4000}
+            value={instructions}
+            onChange={(event) => setInstructions(event.target.value)}
+            className="rounded-md border border-line bg-card px-3 py-2 text-base"
+          />
+          <p className="text-sm text-muted">Valinnainen lyhyt teksti. Varsinainen tehtävä on PDF.</p>
+        </div>
+      </AssignmentMaterialFields>
 
       <div className="grid gap-1.5">
         <label htmlFor="deadline" className="text-sm font-medium">

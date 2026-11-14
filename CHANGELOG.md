@@ -1,8 +1,18 @@
 # Muutosloki
 
+## 14.11.2026
+
+Uusi tehtävä ei määrää palautuksen muotoa. Oppilaalla on tekstikenttä, ja hän lisää liitteitä samalla Lisää tiedosto -painikkeella kuin ennen. Liitteitä voi olla useita, eikä uusi korvaa aiempaa. Kuva, video ja äänite näkyvät sivulla. Muut tiedostot ladataan. Yksi tiedosto on enintään 25 Mt.
+
+Tehtävän materiaali on valinnainen introvideo, valinnainen lyhyt saateteksti ja valinnainen PDF. PDF näkyy sivulla ja sen voi ladata. Uuteen tehtävään ei lisätä dokumenttilinkkejä eikä opettajan kuvia. Introvideo valitaan tiedostona, ei selaimen välittömällä kuvauksella. Luonnoksen videon ja PDF:n voi yhä vaihtaa. Vanhat tehtävät jäävät ennalleen. Näkyvä nimi on Blackboard. Migraatio on `sovellus/drizzle/0013_task_pdf_and_free_files.sql`.
+
+Oletusteema Liitutaulu on tumma vihreä taulu, kapea puukehys ja vaaleat paperikortit. Painikkeilla on liidunvalkoinen reuna, kun ne ovat suoraan taululla. Sana Blackboard näkyy himmeänä liidun värisenä eri kohdissa ja eri kokoisin kirjaimin. Teksti ei ole valittavissa eikä peitä kortteja. Teema Selkeä on aiempi vaalea paperi ilman taustatekstiä. Valinta on oikeassa alakulmassa ja tallennetaan selaimeen avaimella `teema`.
+
 ## 13.11.2026
 
 Tekstikenttä ja tiedoston lataus eivät ole pakollisia palautuksessa. Oppilas voi palauttaa tehtävän tyhjänä. Jos opettaja on valinnut kuvan, videon tai äänitteen, se vaaditaan yhä. Vanha kuva-, video- tai äänitehtävä vaatii yhä oman mediansa.
+
+Gcloud-tilin vaihto on kahdessa skriptissä. `scripts/use-gmail.sh` asettaa tilin `harri.koskinen@gmail.com` ja projektin `development-475808`. `scripts/use-rossum.sh` asettaa tilin `harri.koskinen@rossum.fi` ja projektin `precise-bonus-414910`. Molemmat ajavat `gcloud auth application-default login` ja korvaavat sillä aiemmat application-default-tunnukset. Julkaisun oletusprojekti `scripts/gcp-env.sh`-tiedostossa ei vaihdu.
 
 ## 11.11.2026
 

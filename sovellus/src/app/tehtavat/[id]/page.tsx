@@ -3,9 +3,10 @@ import Link from "next/link";
 
 import { AppHeader } from "@/components/app-header";
 import { ArchiveAssignmentForm } from "@/components/archive-assignment-form";
-import { AssignmentMediaView } from "@/components/assignment-media";
+import { AssignmentMaterials } from "@/components/assignment-materials";
 import { formatFiDate } from "@/components/assignment-cards";
 import { DeadlineForm } from "@/components/deadline-form";
+import { DraftPdfForm } from "@/components/draft-pdf-form";
 import { DraftVideoForm } from "@/components/draft-video-form";
 import { DraftForm } from "@/components/draft-form";
 import { PublishAssignmentForm } from "@/components/publish-assignment-form";
@@ -72,20 +73,24 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
               {assignmentStateLabel(assignment)} ·{" "}
               {formatFiDate(assignment.createdAt)}
               {assignment.responseKind
-                ? ` · Palautus: ${responseKindLabel(assignment.responseKind, assignment.attachmentKind)}`
+                ? ` · Palautus: ${
+                    assignment.freeFiles
+                      ? "Teksti ja liitteet"
+                      : responseKindLabel(assignment.responseKind, assignment.attachmentKind)
+                  }`
                 : ""}
               {assignment.deadline ? ` · Määräaika ${formatDeadline(assignment.deadline)}` : ""}
             </p>
           </div>
-          <p className="whitespace-pre-wrap rounded-lg border border-line bg-card p-6">
-            {assignment.instructions}
-          </p>
-          <AssignmentMediaView
+          <AssignmentMaterials
+            instructions={assignment.instructions}
             media={
               assignment.status === "draft"
                 ? assignment.media.filter((item) => item.kind !== "video")
                 : assignment.media
             }
+            links={assignment.links}
+            taskPdf={assignment.status === "draft" ? null : assignment.taskPdf}
           />
           {assignment.status === "draft" ? (
             <DraftVideoForm
@@ -93,24 +98,8 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
               video={assignment.media.find((item) => item.kind === "video") ?? null}
             />
           ) : null}
-          {assignment.links.length > 0 ? (
-            <section className="grid gap-2">
-              <h2 className="text-xl font-semibold">Linkit</h2>
-              <ul className="grid gap-2">
-                {assignment.links.map((link) => (
-                  <li key={link.id}>
-                    <a
-                      href={link.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-pine underline"
-                    >
-                      {link.title}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </section>
+          {assignment.status === "draft" ? (
+            <DraftPdfForm assignmentId={assignment.id} pdf={assignment.taskPdf} />
           ) : null}
           {assignment.questions.length > 0 ? (
             <section className="grid gap-3">
@@ -154,7 +143,9 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
                         <ResponseView
                           kind={assignment.responseKind}
                           attachment={assignment.attachmentKind}
-                          response={student.response ?? { body: "", media: null, document: null }}
+                          response={
+                            student.response ?? { body: "", media: null, document: null, files: [] }
+                          }
                         />
                       </div>
                     ) : null}
@@ -256,35 +247,22 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
                 ? "Luonnos tallennettu"
                 : "Aloittamatta"}
             {assignment.responseKind
-              ? ` · Palautus: ${responseKindLabel(assignment.responseKind, assignment.attachmentKind)}`
+              ? ` · Palautus: ${
+                  assignment.freeFiles
+                    ? "Teksti ja liitteet"
+                    : responseKindLabel(assignment.responseKind, assignment.attachmentKind)
+                }`
               : ""}
             {assignment.deadline ? ` · Määräaika ${formatDeadline(assignment.deadline)}` : ""}
             {assignment.late ? " · Myöhässä" : ""}
           </p>
         </div>
-        <p className="whitespace-pre-wrap rounded-lg border border-line bg-card p-6">
-          {assignment.instructions}
-        </p>
-        <AssignmentMediaView media={assignment.media} />
-        {assignment.links.length > 0 ? (
-          <section className="grid gap-2">
-            <h2 className="text-xl font-semibold">Linkit</h2>
-            <ul className="grid gap-2">
-              {assignment.links.map((link) => (
-                <li key={link.id}>
-                  <a
-                    href={link.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-pine underline"
-                  >
-                    {link.title}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
+        <AssignmentMaterials
+          instructions={assignment.instructions}
+          media={assignment.media}
+          links={assignment.links}
+          taskPdf={assignment.taskPdf}
+        />
         <section
           className={
             assignment.late && !assignment.returnedAt
@@ -333,6 +311,8 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
               initialBody={assignment.response.body}
               initialMedia={assignment.response.media}
               initialDocument={assignment.response.document}
+              initialFiles={assignment.response.files}
+              freeFiles={assignment.freeFiles}
             />
           ) : null}
           {!assignment.returnedAt && !assignment.archivedAt && !assignment.responseKind ? (

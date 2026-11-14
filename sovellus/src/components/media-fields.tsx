@@ -1,62 +1,28 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
-const MAX_IMAGES = 8;
 const MAX_VIDEO_SECONDS = 180;
 
 type Uploaded = { id: string; name: string };
 
-export function MediaFields({
+export function AssignmentMaterialFields({
   onBusyChange,
+  children,
 }: {
   onBusyChange: (busy: boolean) => void;
+  children?: ReactNode;
 }) {
-  const [images, setImages] = useState<Uploaded[]>([]);
   const [video, setVideo] = useState<Uploaded | null>(null);
+  const [pdf, setPdf] = useState<Uploaded | null>(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
   const busyCount = useRef(0);
-
-  async function upload(kind: "image" | "video", file: File): Promise<string> {
-    const mime = file.type.split(";")[0]?.trim().toLowerCase() ?? "";
-    const response = await fetch("/api/media/uploads", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind, mime, byteSize: file.size }),
-    });
-    const created = (await response.json()) as {
-      error?: string;
-      id?: string;
-      uploadUrl?: string;
-      headers?: Record<string, string>;
-    };
-    if (!response.ok || !created.id || !created.uploadUrl) {
-      throw new Error(created.error ?? "Lähetys epäonnistui.");
-    }
-
-    const sent = await fetch(created.uploadUrl, {
-      method: "PUT",
-      headers: created.headers,
-      body: file,
-    });
-    if (!sent.ok) {
-      const failed = (await sent.json().catch(() => ({}))) as { error?: string };
-      throw new Error(failed.error ?? "Lähetys epäonnistui.");
-    }
-
-    const confirmed = await fetch(`/api/media/uploads/${created.id}/confirm`, {
-      method: "POST",
-    });
-    if (!confirmed.ok) {
-      const failed = (await confirmed.json().catch(() => ({}))) as { error?: string };
-      throw new Error(failed.error ?? "Lähetys epäonnistui.");
-    }
-    return created.id;
-  }
 
   async function withBusy(work: () => Promise<void>) {
     busyCount.current += 1;
+    setBusy(true);
     onBusyChange(true);
     setError("");
     setStatus("Lähetetään…");
@@ -71,75 +37,77 @@ export function MediaFields({
     } finally {
       busyCount.current -= 1;
       if (busyCount.current === 0) {
+        setBusy(false);
         onBusyChange(false);
       }
     }
   }
 
   return (
-    <fieldset className="grid gap-3">
-      <legend className="text-sm font-medium">Kuvat ja ohjevideo</legend>
-      <p className="text-sm text-muted">
-        Valinnainen. Kuvia enintään 8 (jpeg, png tai webp, 8 Mt). Yksi ohjevideo, enintään 3 minuuttia
-        (mp4 tai webm, 150 Mt).
-      </p>
-      <label className="grid gap-1.5 text-sm">
-        Kuvat
-        <input
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          multiple
-          className="text-base"
-          onChange={(event) => {
-            const files = [...(event.target.files ?? [])];
-            event.target.value = "";
-            if (files.length === 0) {
-              return;
-            }
+    <div className="grid gap-6">
+      <fieldset className="grid gap-3">
+        <legend className="text-sm font-medium">Introvideo</legend>
+        <p className="text-sm text-muted">
+          Valinnainen. Yksi video, mp4 tai webm, enintään 3 minuuttia ja 150 Mt. Puhelimessa avautuu
+          sama valinta kuin liitettä lisättäessä.
+        </p>
+        <InstructionVideoControls
+          disabled={busy}
+          onFile={(file) => {
             void withBusy(async () => {
-              if (images.length + files.length > MAX_IMAGES) {
-                throw new Error("Kuvia voi olla enintään 8.");
-              }
-              const added: Uploaded[] = [];
-              for (const file of files) {
-                const id = await upload("image", file);
-                added.push({ id, name: file.name || "Kuva" });
-              }
-              setImages((current) => [...current, ...added]);
+              const id = await uploadTeacherFile("video", file);
+              setVideo({ id, name: file.name || "Introvideo" });
             });
           }}
         />
-      </label>
-      {images.length > 0 ? (
-        <ul className="grid gap-1 text-sm">
-          {images.map((image) => (
-            <li key={image.id}>{image.name}</li>
-          ))}
-        </ul>
-      ) : null}
-      <InstructionVideoControls
-        onFile={(file, source) => {
-          void withBusy(async () => {
-            if (source === "file") {
-              await assertDuration(file);
-            }
-            const id = await upload("video", file);
-            setVideo({ id, name: file.name || "Ohjevideo" });
-          });
-        }}
-      />
-      {video ? <p className="text-sm">{video.name}</p> : null}
-      {video ? <input type="hidden" name="mediaId" value={video.id} /> : null}
-      {images.map((image) => (
-        <input key={image.id} type="hidden" name="mediaId" value={image.id} />
-      ))}
+        {video ? <p className="text-sm">{video.name}</p> : null}
+        {video ? <input type="hidden" name="mediaId" value={video.id} /> : null}
+      </fieldset>
+      {children}
+      <fieldset className="grid gap-3">
+        <legend className="text-sm font-medium">Tehtäväpaperi</legend>
+        <p className="text-sm text-muted">
+          Valinnainen PDF, enintään 25 Mt. Oppilas näkee sen sivulla ja voi ladata sen.
+        </p>
+        {pdf ? <p className="text-sm">{pdf.name}</p> : null}
+        {pdf ? <input type="hidden" name="pdfId" value={pdf.id} /> : null}
+        <label
+          className={`inline-flex h-11 w-fit cursor-pointer items-center rounded-md border border-line bg-card px-4 text-base ${
+            busy ? "pointer-events-none opacity-60" : ""
+          }`}
+        >
+          Lisää PDF
+          <input
+            type="file"
+            accept="application/pdf"
+            className="sr-only"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (!file) {
+                return;
+              }
+              void withBusy(async () => {
+                const mime = file.type.split(";")[0]?.trim().toLowerCase() ?? "";
+                if (mime !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+                  throw new Error("Tehtäväpaperin pitää olla PDF.");
+                }
+                const prepared =
+                  mime === "application/pdf" ? file : new File([file], file.name, { type: "application/pdf" });
+                const id = await uploadTeacherFile("pdf", prepared);
+                setPdf({ id, name: file.name || "tehtava.pdf" });
+              });
+            }}
+          />
+        </label>
+      </fieldset>
       {error ? (
         <p role="alert" className="text-sm text-danger">
           {error}
         </p>
       ) : null}
       {status ? <p className="text-sm text-muted">{status}</p> : null}
-    </fieldset>
+    </div>
   );
 }
 
@@ -148,138 +116,41 @@ export function InstructionVideoControls({
   onFile,
 }: {
   disabled?: boolean;
-  onFile: (file: File, source: "camera" | "file") => void;
+  onFile: (file: File) => void;
 }) {
-  const [recording, setRecording] = useState(false);
   const [error, setError] = useState("");
-  const previewRef = useRef<HTMLVideoElement>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const stopTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    const preview = previewRef.current;
-    const stream = streamRef.current;
-    if (!recording || !preview || !stream) {
-      return;
-    }
-    preview.srcObject = stream;
-    void preview.play().catch(() => undefined);
-    return () => {
-      preview.srcObject = null;
-    };
-  }, [recording]);
-
-  useEffect(() => {
-    return () => {
-      if (stopTimerRef.current !== null) {
-        window.clearTimeout(stopTimerRef.current);
-      }
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-    };
-  }, []);
-
-  function stopStream() {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
-  }
-
-  async function startCamera() {
-    setError("");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      streamRef.current = stream;
-      const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
-        ? "video/webm;codecs=vp8,opus"
-        : "video/webm";
-      const recorder = new MediaRecorder(stream, { mimeType: mime });
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunks.push(event.data);
-        }
-      };
-      recorder.onstop = () => {
-        if (stopTimerRef.current !== null) {
-          window.clearTimeout(stopTimerRef.current);
-          stopTimerRef.current = null;
-        }
-        stopStream();
-        recorderRef.current = null;
-        setRecording(false);
-        onFile(new File(chunks, "ohjevideo.webm", { type: "video/webm" }), "camera");
-      };
-      recorderRef.current = recorder;
-      setRecording(true);
-      recorder.start();
-      stopTimerRef.current = window.setTimeout(() => {
-        if (recorder.state === "recording") {
-          recorder.stop();
-        }
-      }, MAX_VIDEO_SECONDS * 1000);
-    } catch {
-      stopStream();
-      setRecording(false);
-      setError("Kameraa ei saatu käyttöön.");
-    }
-  }
 
   return (
-    <div className="grid gap-3">
-      {recording ? (
-        <video
-          ref={previewRef}
-          muted
-          autoPlay
-          playsInline
-          className="aspect-video w-full rounded-lg bg-black object-contain"
-        />
-      ) : null}
-      <label className="grid gap-1.5 text-sm">
-        Videotiedosto
+    <div className="grid gap-2">
+      <label
+        className={`inline-flex h-11 w-fit cursor-pointer items-center rounded-md border border-line bg-card px-4 text-base ${
+          disabled ? "pointer-events-none opacity-60" : ""
+        }`}
+      >
+        Lisää video
         <input
           type="file"
-          accept="video/mp4,video/webm"
-          disabled={disabled || recording}
-          className="text-base disabled:opacity-60"
+          className="sr-only"
+          disabled={disabled}
           onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = "";
             if (!file) {
               return;
             }
-            onFile(file, "file");
+            void (async () => {
+              setError("");
+              try {
+                const prepared = videoFile(file);
+                await assertDuration(prepared);
+                onFile(prepared);
+              } catch (caught) {
+                setError(caught instanceof Error ? caught.message : "Videon lähetys epäonnistui.");
+              }
+            })();
           }}
         />
       </label>
-      <div className="flex flex-wrap gap-2">
-        {recording ? (
-          <button
-            type="button"
-            className="h-11 rounded-md border border-line bg-card px-4 text-base"
-            onClick={() => recorderRef.current?.stop()}
-          >
-            Lopeta kuvaus
-          </button>
-        ) : (
-          <button
-            type="button"
-            disabled={disabled}
-            className="h-11 rounded-md border border-line bg-card px-4 text-base disabled:opacity-60"
-            onClick={() => {
-              void startCamera();
-            }}
-          >
-            Kuvaa ohjevideo
-          </button>
-        )}
-        {recording ? (
-          <span className="self-center text-sm text-muted">
-            Näet kuvan tästä. Ääni tallentuu, esikatselu on mykistetty. Tallennus päättyy 3
-            minuutissa.
-          </span>
-        ) : null}
-      </div>
       {error ? (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -287,6 +158,56 @@ export function InstructionVideoControls({
       ) : null}
     </div>
   );
+}
+
+async function uploadTeacherFile(kind: "video" | "pdf", file: File): Promise<string> {
+  const mime = file.type.split(";")[0]?.trim().toLowerCase() ?? "";
+  const response = await fetch("/api/media/uploads", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ kind, mime, byteSize: file.size, fileName: file.name }),
+  });
+  const created = (await response.json()) as {
+    error?: string;
+    id?: string;
+    uploadUrl?: string;
+    headers?: Record<string, string>;
+  };
+  if (!response.ok || !created.id || !created.uploadUrl) {
+    throw new Error(created.error ?? "Lähetys epäonnistui.");
+  }
+
+  const sent = await fetch(created.uploadUrl, {
+    method: "PUT",
+    headers: created.headers,
+    body: file,
+  });
+  if (!sent.ok) {
+    const failed = (await sent.json().catch(() => ({}))) as { error?: string };
+    throw new Error(failed.error ?? "Lähetys epäonnistui.");
+  }
+
+  const confirmed = await fetch(`/api/media/uploads/${created.id}/confirm`, { method: "POST" });
+  if (!confirmed.ok) {
+    const failed = (await confirmed.json().catch(() => ({}))) as { error?: string };
+    throw new Error(failed.error ?? "Lähetys epäonnistui.");
+  }
+  return created.id;
+}
+
+function videoFile(file: File): File {
+  const mime = file.type.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (mime === "video/mp4" || mime === "video/webm") {
+    return file;
+  }
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".mp4")) {
+    return new File([file], file.name, { type: "video/mp4" });
+  }
+  if (name.endsWith(".webm")) {
+    return new File([file], file.name, { type: "video/webm" });
+  }
+  throw new Error("Video saa olla mp4 tai webm.");
 }
 
 function assertDuration(file: File): Promise<void> {

@@ -3,7 +3,7 @@
 import { useActionState, useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import { autosaveTextResponse, saveAssignmentDraft } from "@/app/actions/assignments";
-import { ResponseMedia } from "@/components/response-view";
+import { ResponseFileView, ResponseMedia } from "@/components/response-view";
 import type {
   AssignmentMediaItem,
   FormState,
@@ -22,6 +22,8 @@ export function ResponseForm({
   initialBody,
   initialMedia,
   initialDocument,
+  initialFiles = [],
+  freeFiles = false,
 }: {
   assignmentId: string;
   kind: ResponseKind;
@@ -29,6 +31,8 @@ export function ResponseForm({
   initialBody: string;
   initialMedia: AssignmentMediaItem | null;
   initialDocument: ResponseDocument | null;
+  initialFiles?: ResponseDocument[];
+  freeFiles?: boolean;
 }) {
   if (kind === "text") {
     return (
@@ -38,6 +42,8 @@ export function ResponseForm({
         attachment={attachment}
         initialMedia={initialMedia}
         initialDocument={initialDocument}
+        initialFiles={initialFiles}
+        freeFiles={freeFiles}
       />
     );
   }
@@ -57,12 +63,16 @@ function TextResponse({
   attachment,
   initialMedia,
   initialDocument,
+  initialFiles,
+  freeFiles,
 }: {
   assignmentId: string;
   initialBody: string;
   attachment: MediaKind | null;
   initialMedia: AssignmentMediaItem | null;
   initialDocument: ResponseDocument | null;
+  initialFiles: ResponseDocument[];
+  freeFiles: boolean;
 }) {
   const [body, setBody] = useState(initialBody);
   const [status, setStatus] = useState("");
@@ -151,7 +161,12 @@ function TextResponse({
       <p className="text-sm text-muted">
         Teksti tallentuu automaattisesti. Palautuksen jälkeen vastausta ei voi muokata.
       </p>
-      <DocumentControls assignmentId={assignmentId} initialDocument={initialDocument} />
+      <DocumentControls
+        assignmentId={assignmentId}
+        initialDocument={initialDocument}
+        initialFiles={initialFiles}
+        multiple={freeFiles}
+      />
       {attachment ? (
         <MediaControls
           assignmentId={assignmentId}
@@ -390,11 +405,16 @@ function MediaControls({
 export function DocumentControls({
   assignmentId,
   initialDocument,
+  initialFiles = [],
+  multiple = false,
 }: {
   assignmentId: string;
   initialDocument: ResponseDocument | null;
+  initialFiles?: ResponseDocument[];
+  multiple?: boolean;
 }) {
   const [documentFile, setDocumentFile] = useState(initialDocument);
+  const [files, setFiles] = useState(initialFiles);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -405,11 +425,16 @@ export function DocumentControls({
     setStatus("Lähetetään…");
     try {
       const id = await uploadResponse(assignmentId, "file", file);
-      setDocumentFile({
+      const saved = {
         id,
         name: file.name || "tiedosto",
         mime: file.type.split(";")[0]?.trim().toLowerCase() || "application/octet-stream",
-      });
+      };
+      if (multiple) {
+        setFiles((current) => [...current, saved]);
+      } else {
+        setDocumentFile(saved);
+      }
       setStatus("Tiedosto tallennettu.");
     } catch (caught) {
       setStatus("");
@@ -422,11 +447,15 @@ export function DocumentControls({
   return (
     <div className="grid gap-2">
       <p className="text-sm text-muted">
-        Voit myös lisätä vastauksen tiedostona laitteelta, esimerkiksi Word-asiakirjana. Enintään 25
-        Mt. Uusi tiedosto korvaa edellisen.
+        {multiple
+          ? "Voit lisätä niin monta tiedostoa kuin haluat. Yksi tiedosto enintään 25 Mt."
+          : "Voit myös lisätä vastauksen tiedostona laitteelta, esimerkiksi Word-asiakirjana. Enintään 25 Mt. Uusi tiedosto korvaa edellisen."}
       </p>
-      {documentFile ? (
-        <a href={`/api/media/${documentFile.id}`} className="text-pine underline">
+      {multiple
+        ? files.map((file) => <ResponseFileView key={file.id} file={file} />)
+        : null}
+      {!multiple && documentFile ? (
+        <a href={`/api/media/${documentFile.id}?lataa=1`} className="text-pine underline">
           {documentFile.name}
         </a>
       ) : null}

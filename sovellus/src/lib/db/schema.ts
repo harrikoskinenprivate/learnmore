@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   index,
   type AnyPgColumn,
   integer,
@@ -65,6 +66,8 @@ export const assignments = pgTable("assignments", {
   status: assignmentStatus("status").notNull().default("draft"),
   responseKind: responseKind("response_kind"),
   attachmentKind: mediaKind("attachment_kind"),
+  freeFiles: boolean("free_files").notNull().default(false),
+  taskPdfId: uuid("task_pdf_id"),
   parentAssignmentId: uuid("parent_assignment_id").references((): AnyPgColumn => assignments.id, {
     onDelete: "cascade",
   }),
@@ -73,6 +76,7 @@ export const assignments = pgTable("assignments", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   index("assignments_parent_assignment_id_idx").on(table.parentAssignmentId),
+  index("assignments_task_pdf_id_idx").on(table.taskPdfId),
   index("assignments_archived_at_idx")
     .on(table.archivedAt, table.id)
     .where(sql`${table.archivedAt} IS NOT NULL`),

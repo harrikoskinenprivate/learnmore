@@ -14,7 +14,9 @@ import {
   listAssignmentMedia,
   MediaError,
   replaceDraftInstructionVideo,
-  validateMediaSelection,
+  replaceDraftTaskPdf,
+  validateIntroVideo,
+  validateTaskPdf,
 } from "@/lib/media";
 import { db } from "@/lib/db";
 import {
@@ -44,16 +46,8 @@ import type {
   TeacherWorkItem,
 } from "@/lib/types";
 import { ARCHIVE_PAGE_SIZE } from "@/lib/types";
-import {
-  isUuid,
-  validateAnswer,
-  validateInstructions,
-  validateLinkTitle,
-  validateTitle,
-  validateUrl,
-} from "@/lib/validation";
+import { isUuid, validateAnswer, validateTitle } from "@/lib/validation";
 
-const MAX_LINKS = 15;
 const parentAssignment = alias(assignments, "parent_assignment");
 const responseDocument = alias(assignmentMedia, "response_document");
 
@@ -62,16 +56,6 @@ function asAttachment(value: MediaKind | "file" | null): MediaKind | null {
     return value;
   }
   return null;
-}
-
-function parseAttachmentKind(value: string): MediaKind | null | "invalid" {
-  if (!value) {
-    return null;
-  }
-  if (value === "image" || value === "video" || value === "audio") {
-    return value;
-  }
-  return "invalid";
 }
 
 function readyMedia(row: {
@@ -106,7 +90,56 @@ function readyDocument(
   };
 }
 
-export type AssignmentLinkInput = { title: string; url: string };
+async function listResponseFiles(assignmentId: string): Promise<Map<string, ResponseDocument[]>> {
+  const rows = await db
+    .select({
+      id: assignmentMedia.id,
+      studentId: assignmentMedia.studentId,
+      name: assignmentMedia.fileName,
+      mime: assignmentMedia.mime,
+    })
+    .from(assignmentMedia)
+    .where(
+      and(
+        eq(assignmentMedia.assignmentId, assignmentId),
+        eq(assignmentMedia.kind, "file"),
+        eq(assignmentMedia.status, "ready"),
+        isNotNull(assignmentMedia.studentId),
+      ),
+    )
+    .orderBy(asc(assignmentMedia.createdAt));
+  const files = new Map<string, ResponseDocument[]>();
+  for (const row of rows) {
+    if (!row.studentId) {
+      continue;
+    }
+    const list = files.get(row.studentId) ?? [];
+    list.push({ id: row.id, name: row.name || "tiedosto", mime: row.mime });
+    files.set(row.studentId, list);
+  }
+  return files;
+}
+
+async function loadTaskPdf(taskPdfId: string | null): Promise<ResponseDocument | null> {
+  if (!taskPdfId) {
+    return null;
+  }
+  const rows = await db
+    .select({
+      id: assignmentMedia.id,
+      name: assignmentMedia.fileName,
+      mime: assignmentMedia.mime,
+      status: assignmentMedia.status,
+    })
+    .from(assignmentMedia)
+    .where(eq(assignmentMedia.id, taskPdfId))
+    .limit(1);
+  const row = rows[0];
+  if (!row || row.status !== "ready" || row.mime !== "application/pdf") {
+    return null;
+  }
+  return { id: row.id, name: row.name || "tehtava.pdf", mime: row.mime };
+}
 
 export async function listTeacherDrafts(): Promise<TeacherDraftListItem[]> {
   await requireTeacher();
@@ -456,6 +489,8 @@ export async function getTeacherAssignment(id: string): Promise<TeacherAssignmen
       archivedAt: assignments.archivedAt,
       responseKind: assignments.responseKind,
       attachmentKind: assignments.attachmentKind,
+      freeFiles: assignments.freeFiles,
+      taskPdfId: assignments.taskPdfId,
       parentAssignmentId: assignments.parentAssignmentId,
       deadline: assignments.deadline,
       createdAt: assignments.createdAt,
@@ -528,12 +563,17 @@ export async function getTeacherAssignment(id: string): Promise<TeacherAssignmen
 
   const responseByStudent = new Map(responses.map((row) => [row.studentId, row]));
 
-  const media = await listAssignmentMedia(id);
-  const context = await loadParentAndFeedback(id, assignment.parentAssignmentId);
+  const [media, context, taskPdf, responseFiles] = await Promise.all([
+    listAssignmentMedia(id),
+    loadParentAndFeedback(id, assignment.parentAssignmentId),
+    loadTaskPdf(assignment.taskPdfId),
+    assignment.freeFiles ? listResponseFiles(id) : Promise.resolve(new Map<string, ResponseDocument[]>()),
+  ]);
 
   return {
     ...assignment,
     attachmentKind: asAttachment(assignment.attachmentKind),
+    taskPdf,
     parent: context.parent,
     feedback: context.feedback,
     links,
@@ -559,6 +599,7 @@ export async function getTeacherAssignment(id: string): Promise<TeacherAssignmen
             body: responseByStudent.get(student.id)?.body ?? "",
             media: assignment.responseKind ? readyMedia(responseByStudent.get(student.id)) : null,
             document: readyDocument(responseByStudent.get(student.id)),
+            files: assignment.freeFiles ? (responseFiles.get(student.id) ?? []) : [],
           }
         : null,
     })),
@@ -598,6 +639,8 @@ export async function getStudentAssignment(id: string): Promise<StudentAssignmen
       deadline: assignments.deadline,
       responseKind: assignments.responseKind,
       attachmentKind: assignments.attachmentKind,
+      freeFiles: assignments.freeFiles,
+      taskPdfId: assignments.taskPdfId,
       parentAssignmentId: assignments.parentAssignmentId,
       id: assignments.id,
       title: assignments.title,
@@ -619,7 +662,7 @@ export async function getStudentAssignment(id: string): Promise<StudentAssignmen
     notFound();
   }
 
-  const [links, questions, saved, media, responseRows] = await Promise.all([
+  const [links, questions, saved, media, responseRows, taskPdf, responseFiles] = await Promise.all([
     db
       .select({
         id: assignmentLinks.id,
@@ -667,20 +710,25 @@ export async function getStudentAssignment(id: string): Promise<StudentAssignmen
         ),
       )
       .limit(1),
+    loadTaskPdf(assignment.taskPdfId),
+    assignment.freeFiles ? listResponseFiles(id) : Promise.resolve(new Map<string, ResponseDocument[]>()),
   ]);
 
   const context = await loadParentAndFeedback(id, assignment.parentAssignmentId, user.id);
   const answerByQuestion = new Map(saved.map((row) => [row.questionId, row.body]));
+  const files = assignment.freeFiles ? (responseFiles.get(user.id) ?? []) : [];
   const response: StoredResponse = {
     body: responseRows[0]?.body ?? "",
     media: readyMedia(responseRows[0]),
     document: readyDocument(responseRows[0]),
+    files,
   };
   const hasQuestionDraft = [...answerByQuestion.values()].some((body) => body.trim().length > 0);
   const hasTypedDraft =
     assignment.responseKind === "text"
       ? response.body.trim().length > 0 ||
         response.document !== null ||
+        files.length > 0 ||
         (assignment.attachmentKind !== null && response.media !== null)
       : response.media !== null || response.document !== null;
 
@@ -693,6 +741,8 @@ export async function getStudentAssignment(id: string): Promise<StudentAssignmen
     media,
     responseKind: assignment.responseKind,
     attachmentKind: asAttachment(assignment.attachmentKind),
+    freeFiles: assignment.freeFiles,
+    taskPdf,
     parent: context.parent,
     feedback: context.feedback,
     questions: questions.map((question) => ({
@@ -713,10 +763,9 @@ export async function getStudentAssignment(id: string): Promise<StudentAssignmen
 export async function createAssignment(input: {
   title: string;
   instructions: string;
-  links: AssignmentLinkInput[];
-  attachmentKind: string;
   studentIds: string[];
   mediaIds: string[];
+  pdfId: string;
   deadline: string;
   publish: boolean;
   parentAssignmentId?: string;
@@ -729,35 +778,8 @@ export async function createAssignment(input: {
   if (titleError) {
     return { error: titleError };
   }
-  const instructionsError = validateInstructions(instructions);
-  if (instructionsError) {
-    return { error: instructionsError };
-  }
-
-  const links: AssignmentLinkInput[] = [];
-  for (const link of input.links) {
-    const linkTitle = link.title.trim();
-    const url = link.url.trim();
-    if (!linkTitle && !url) {
-      continue;
-    }
-    const linkTitleError = validateLinkTitle(linkTitle);
-    if (linkTitleError) {
-      return { error: linkTitleError };
-    }
-    const urlError = validateUrl(url);
-    if (urlError) {
-      return { error: urlError };
-    }
-    links.push({ title: linkTitle, url });
-  }
-  if (links.length > MAX_LINKS) {
-    return { error: "Linkkejä voi olla enintään 15." };
-  }
-
-  const attachmentKind = parseAttachmentKind(input.attachmentKind);
-  if (attachmentKind === "invalid") {
-    return { error: "Valitse liite." };
+  if (instructions.length > 4000) {
+    return { error: "Saateteksti on liian pitkä." };
   }
 
   const deadline = parseDeadlineInput(input.deadline);
@@ -792,8 +814,10 @@ export async function createAssignment(input: {
   }
 
   let mediaIds: string[];
+  let taskPdfId: string | null;
   try {
-    mediaIds = await validateMediaSelection(teacher.id, input.mediaIds);
+    mediaIds = await validateIntroVideo(teacher.id, input.mediaIds);
+    taskPdfId = await validateTaskPdf(teacher.id, input.pdfId);
   } catch (error) {
     if (error instanceof MediaError) {
       return { error: error.message };
@@ -811,21 +835,18 @@ export async function createAssignment(input: {
       createdBy: teacher.id,
       status: input.publish ? "published" : "draft",
       responseKind: "text",
-      attachmentKind,
+      attachmentKind: null,
+      freeFiles: true,
+      taskPdfId,
       parentAssignmentId: parentAssignmentId || null,
       deadline,
     });
 
-    if (links.length > 0) {
-      await tx.insert(assignmentLinks).values(
-        links.map((link, index) => ({
-          id: randomUUID(),
-          assignmentId,
-          title: link.title,
-          url: link.url,
-          sortOrder: index,
-        })),
-      );
+    if (taskPdfId) {
+      await tx
+        .update(assignmentMedia)
+        .set({ assignmentId, sortOrder: 0 })
+        .where(eq(assignmentMedia.id, taskPdfId));
     }
 
     if (input.publish) {
@@ -1244,6 +1265,45 @@ export async function setDraftInstructionVideo(input: {
 
   return {
     message: input.mediaId ? "Ohjevideo tallennettu." : "Ohjevideo poistettu.",
+  };
+}
+
+export async function setDraftTaskPdf(input: {
+  assignmentId: string;
+  mediaId: string | null;
+}): Promise<FormState> {
+  const teacher = await requireTeacher();
+  if (!isUuid(input.assignmentId) || (input.mediaId !== null && !isUuid(input.mediaId))) {
+    return { error: "Tehtävää ei löydy." };
+  }
+
+  const rows = await db
+    .select({ status: assignments.status })
+    .from(assignments)
+    .where(eq(assignments.id, input.assignmentId))
+    .limit(1);
+  if (!rows[0]) {
+    return { error: "Tehtävää ei löydy." };
+  }
+  if (rows[0].status !== "draft") {
+    return { error: "Vain luonnosta voi muuttaa." };
+  }
+
+  try {
+    await replaceDraftTaskPdf({
+      teacherId: teacher.id,
+      assignmentId: input.assignmentId,
+      mediaId: input.mediaId,
+    });
+  } catch (error) {
+    if (error instanceof MediaError) {
+      return { error: error.message };
+    }
+    throw error;
+  }
+
+  return {
+    message: input.mediaId ? "Tehtäväpaperi tallennettu." : "Tehtäväpaperi poistettu.",
   };
 }
 

@@ -63,6 +63,7 @@ export type StoredResponse = {
   body: string;
   media: AssignmentMediaItem | null;
   document: ResponseDocument | null;
+  files: ResponseDocument[];
 };
 
 export type LinkedAssignment = {
@@ -138,6 +139,8 @@ export type TeacherAssignmentDetail = {
   media: AssignmentMediaItem[];
   responseKind: ResponseKind | null;
   attachmentKind: MediaKind | null;
+  freeFiles: boolean;
+  taskPdf: ResponseDocument | null;
   parent: { id: string; title: string } | null;
   feedback: LinkedAssignment[];
   questions: { id: string; prompt: string }[];
@@ -161,6 +164,8 @@ export type StudentAssignmentDetail = {
   media: AssignmentMediaItem[];
   responseKind: ResponseKind | null;
   attachmentKind: MediaKind | null;
+  freeFiles: boolean;
+  taskPdf: ResponseDocument | null;
   parent: { id: string; title: string } | null;
   feedback: LinkedAssignment[];
   questions: { id: string; prompt: string; answer: string }[];

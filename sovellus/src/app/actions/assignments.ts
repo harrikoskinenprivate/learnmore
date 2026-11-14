@@ -13,6 +13,7 @@ import {
   saveTextResponse,
   setAssignmentArchived,
   setDraftInstructionVideo,
+  setDraftTaskPdf,
   updateAssignmentDeadline,
 } from "@/lib/assignments";
 import type { ArchiveCursor, ArchivedAssignmentPage, FormState } from "@/lib/types";
@@ -21,21 +22,12 @@ export async function addAssignment(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  const titles = formData.getAll("linkTitle").map((value) => String(value));
-  const urls = formData.getAll("linkUrl").map((value) => String(value));
-  const linkCount = Math.max(titles.length, urls.length);
-  const links = Array.from({ length: linkCount }, (_, index) => ({
-    title: titles[index] ?? "",
-    url: urls[index] ?? "",
-  }));
-
   const result = await createAssignment({
     title: String(formData.get("title") ?? ""),
     instructions: String(formData.get("instructions") ?? ""),
-    links,
-    attachmentKind: String(formData.get("attachmentKind") ?? ""),
     studentIds: formData.getAll("studentId").map((value) => String(value)),
     mediaIds: formData.getAll("mediaId").map((value) => String(value)),
+    pdfId: String(formData.get("pdfId") ?? ""),
     deadline: String(formData.get("deadline") ?? ""),
     publish: formData.get("intent") === "publish",
     parentAssignmentId: String(formData.get("parentAssignmentId") ?? ""),
@@ -130,6 +122,18 @@ export async function saveDraftInstructionVideo(
   mediaId: string | null,
 ): Promise<FormState> {
   const result = await setDraftInstructionVideo({ assignmentId, mediaId });
+  if (!result.error) {
+    revalidatePath(`/tehtavat/${assignmentId}`);
+    revalidatePath("/tehtavat");
+  }
+  return result;
+}
+
+export async function saveDraftTaskPdf(
+  assignmentId: string,
+  mediaId: string | null,
+): Promise<FormState> {
+  const result = await setDraftTaskPdf({ assignmentId, mediaId });
   if (!result.error) {
     revalidatePath(`/tehtavat/${assignmentId}`);
     revalidatePath("/tehtavat");

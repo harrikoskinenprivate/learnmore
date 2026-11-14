@@ -26,7 +26,7 @@ import type {
 } from "@/lib/types";
 
 export const metadata = {
-  title: "Oppimistehtävät",
+  title: "Blackboard",
 };
 
 export default function HomePage() {
