@@ -2,6 +2,8 @@
 
 ## 14.11.2026
 
+Oppilaan yläreunassa Etusivu on Kirjaudu ulos -painikkeen vasemmalla puolella. Se vie tehtävälistan päänäkymään. Tehtäväsivun paluulinkki vie samaan osoitteeseen.
+
 Uusi tehtävä ei määrää palautuksen muotoa. Oppilaalla on tekstikenttä, ja hän lisää liitteitä samalla Lisää tiedosto -painikkeella kuin ennen. Liitteitä voi olla useita, eikä uusi korvaa aiempaa. Kuva, video ja äänite näkyvät sivulla. Muut tiedostot ladataan. Yksi tiedosto on enintään 25 Mt.
 
 Tehtävän materiaali on valinnainen introvideo, valinnainen lyhyt saateteksti ja valinnainen PDF. PDF näkyy sivulla ja sen voi ladata. Uuteen tehtävään ei lisätä dokumenttilinkkejä eikä opettajan kuvia. Introvideo valitaan tiedostona, ei selaimen välittömällä kuvauksella. Luonnoksen videon ja PDF:n voi yhä vaihtaa. Vanhat tehtävät jäävät ennalleen. Näkyvä nimi on Blackboard. Migraatio on `sovellus/drizzle/0013_task_pdf_and_free_files.sql`.

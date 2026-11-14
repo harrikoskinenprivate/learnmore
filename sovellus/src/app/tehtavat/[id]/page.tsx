@@ -225,8 +225,8 @@ async function Assignment({ params }: { params: Promise<{ id: string }> }) {
       <AppHeader user={user} />
       <article className="grid gap-6">
         <div>
-          <Link href="/tehtavat" className="text-sm text-pine">
-            Tehtävät
+          <Link href="/" className="text-sm text-pine">
+            Etusivu
           </Link>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight">{assignment.title}</h1>
           {assignment.parent ? (
