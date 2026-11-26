@@ -61,27 +61,23 @@ export function DraftVideoForm({
       ) : null}
       <InstructionVideoControls
         disabled={busy}
-        onFile={(file) => {
-          void (async () => {
-            setBusy(true);
-            setError("");
-            setStatus("Lähetetään…");
-            try {
-              const id = await uploadVideo(file);
-              const result = await saveDraftInstructionVideo(assignmentId, id);
-              if (result.error) {
-                setStatus("");
-                setError(result.error);
-                return;
-              }
-              setStatus(result.message ?? "");
-            } catch (caught) {
-              setStatus("");
-              setError(caught instanceof Error ? caught.message : "Lähetys epäonnistui.");
-            } finally {
-              setBusy(false);
+        onFile={async (file) => {
+          setBusy(true);
+          setError("");
+          setStatus("Lähetetään…");
+          try {
+            const id = await uploadVideo(file);
+            const result = await saveDraftInstructionVideo(assignmentId, id);
+            if (result.error) {
+              throw new Error(result.error);
             }
-          })();
+            setStatus(result.message ?? "");
+          } catch (caught) {
+            setStatus("");
+            throw caught instanceof Error ? caught : new Error("Lähetys epäonnistui.");
+          } finally {
+            setBusy(false);
+          }
         }}
       />
       {error ? (

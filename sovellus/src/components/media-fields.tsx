@@ -2,7 +2,8 @@
 
 import { useRef, useState, type ReactNode } from "react";
 
-const MAX_VIDEO_SECONDS = 180;
+import { KeptVideo } from "@/components/video-recorder";
+import { MAX_VIDEO_BYTES, MAX_VIDEO_SECONDS, oversizedVideoMessage } from "@/lib/media-limits";
 
 type Uploaded = { id: string; name: string };
 
@@ -20,7 +21,7 @@ export function AssignmentMaterialFields({
   const [busy, setBusy] = useState(false);
   const busyCount = useRef(0);
 
-  async function withBusy(work: () => Promise<void>) {
+  async function withBusy(work: () => Promise<void>, report = true): Promise<string | null> {
     busyCount.current += 1;
     setBusy(true);
     onBusyChange(true);
@@ -31,9 +32,14 @@ export function AssignmentMaterialFields({
       if (busyCount.current === 1) {
         setStatus("");
       }
+      return null;
     } catch (caught) {
       setStatus("");
-      setError(caught instanceof Error ? caught.message : "Lähetys epäonnistui.");
+      const message = caught instanceof Error ? caught.message : "Lähetys epäonnistui.";
+      if (report) {
+        setError(message);
+      }
+      return message;
     } finally {
       busyCount.current -= 1;
       if (busyCount.current === 0) {
@@ -48,16 +54,20 @@ export function AssignmentMaterialFields({
       <fieldset className="grid gap-3">
         <legend className="text-sm font-medium">Introvideo</legend>
         <p className="text-sm text-muted">
-          Valinnainen. Yksi video, mp4 tai webm, enintään 3 minuuttia ja 150 Mt. Puhelimessa avautuu
-          sama valinta kuin liitettä lisättäessä.
+          Valinnainen. Yksi video, mp4 tai webm, enintään 3 minuuttia ja 200 Mt. Puhelimessa avautuu
+          sama valinta kuin liitettä lisättäessä. Jos video on liian suuri, sen voi tallentaa
+          puhelimeen.
         </p>
         <InstructionVideoControls
           disabled={busy}
-          onFile={(file) => {
-            void withBusy(async () => {
+          onFile={async (file) => {
+            const message = await withBusy(async () => {
               const id = await uploadTeacherFile("video", file);
               setVideo({ id, name: file.name || "Introvideo" });
-            });
+            }, false);
+            if (message) {
+              throw new Error(message);
+            }
           }}
         />
         {video ? <p className="text-sm">{video.name}</p> : null}
@@ -116,9 +126,10 @@ export function InstructionVideoControls({
   onFile,
 }: {
   disabled?: boolean;
-  onFile: (file: File) => void;
+  onFile: (file: File) => void | Promise<void>;
 }) {
   const [error, setError] = useState("");
+  const [kept, setKept] = useState<File | null>(null);
 
   return (
     <div className="grid gap-2">
@@ -140,18 +151,27 @@ export function InstructionVideoControls({
             }
             void (async () => {
               setError("");
+              setKept(null);
+              let prepared = file;
               try {
-                const prepared = videoFile(file);
+                prepared = videoFile(file);
+                if (prepared.size > MAX_VIDEO_BYTES) {
+                  setKept(prepared);
+                  setError(oversizedVideoMessage(prepared));
+                  return;
+                }
                 await assertDuration(prepared);
-                onFile(prepared);
+                await onFile(prepared);
               } catch (caught) {
+                setKept(prepared);
                 setError(caught instanceof Error ? caught.message : "Videon lähetys epäonnistui.");
               }
             })();
           }}
         />
       </label>
-      {error ? (
+      {kept ? <KeptVideo file={kept} message={error} /> : null}
+      {error && !kept ? (
         <p role="alert" className="text-sm text-danger">
           {error}
         </p>

@@ -4,6 +4,15 @@ import { useActionState, useCallback, useEffect, useRef, useState, type ChangeEv
 
 import { autosaveTextResponse, saveAssignmentDraft } from "@/app/actions/assignments";
 import { ResponseFileView, ResponseMedia } from "@/components/response-view";
+import { KeptVideo, VideoRecorder } from "@/components/video-recorder";
+import {
+  MAX_FILE_BYTES,
+  MAX_VIDEO_BYTES,
+  MAX_VIDEO_SECONDS,
+  oversizedVideoMessage,
+  videoMimeOf,
+  withVideoMime,
+} from "@/lib/media-limits";
 import type {
   AssignmentMediaItem,
   FormState,
@@ -13,7 +22,6 @@ import type {
 } from "@/lib/types";
 
 const initialState: FormState = {};
-const MAX_VIDEO_SECONDS = 180;
 
 export function ResponseForm({
   assignmentId,
@@ -83,6 +91,7 @@ function TextResponse({
     busy: false,
     recording: false,
   });
+  const [filesGate, setFilesGate] = useState({ busy: false, recording: false });
   const [returnState, returnAction, returning] = useActionState(
     saveAssignmentDraft,
     initialState,
@@ -166,6 +175,7 @@ function TextResponse({
         initialDocument={initialDocument}
         initialFiles={initialFiles}
         multiple={freeFiles}
+        onActivity={setFilesGate}
       />
       {attachment ? (
         <MediaControls
@@ -197,6 +207,8 @@ function TextResponse({
         disabled={
           returning ||
           pending ||
+          filesGate.busy ||
+          filesGate.recording ||
           (attachment !== null &&
             (mediaGate.busy || mediaGate.recording || mediaGate.media === null))
         }
@@ -224,6 +236,7 @@ function MediaResponse({
     busy: false,
     recording: false,
   });
+  const [filesGate, setFilesGate] = useState({ busy: false, recording: false });
   const [returnState, returnAction, returning] = useActionState(
     saveAssignmentDraft,
     initialState,
@@ -232,7 +245,11 @@ function MediaResponse({
   return (
     <form action={returnAction} className="grid gap-4">
       <input type="hidden" name="assignmentId" value={assignmentId} />
-      <DocumentControls assignmentId={assignmentId} initialDocument={initialDocument} />
+      <DocumentControls
+        assignmentId={assignmentId}
+        initialDocument={initialDocument}
+        onActivity={setFilesGate}
+      />
       <MediaControls
         assignmentId={assignmentId}
         kind={kind}
@@ -249,7 +266,14 @@ function MediaResponse({
         type="submit"
         name="intent"
         value="return"
-        disabled={returning || gate.busy || gate.recording || !gate.media}
+        disabled={
+          returning ||
+          gate.busy ||
+          gate.recording ||
+          filesGate.busy ||
+          filesGate.recording ||
+          !gate.media
+        }
         className="h-11 justify-self-start rounded-md bg-pine px-4 text-base font-medium text-white hover:bg-pine-dark disabled:opacity-60"
       >
         {returning ? "Tallennetaan…" : "Palauta"}
@@ -274,6 +298,7 @@ function MediaControls({
   }) => void;
 }) {
   const [media, setMedia] = useState(initialMedia);
+  const [kept, setKept] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -286,14 +311,31 @@ function MediaControls({
     onStateRef.current({ media, busy, recording });
   }, [media, busy, recording]);
 
-  async function send(file: File, source: "record" | "file" = "file") {
+  async function send(
+    file: File,
+    source: "record" | "file" = "file",
+    stoppedForSize = false,
+  ) {
+    if (kind === "video" && file.size > MAX_VIDEO_BYTES) {
+      setKept(file);
+      setError(oversizedVideoMessage(file));
+      setStatus("");
+      return;
+    }
     setBusy(true);
     setError("");
     setStatus("Lähetetään…");
+    let prepared = file;
     try {
-      let prepared = file;
       if (kind === "video") {
-        await assertMediaDuration(file, "video");
+        prepared = normalizeVideoFile(file);
+        const mime = prepared.type.split(";")[0]?.trim().toLowerCase() ?? "";
+        if (mime !== "video/mp4" && mime !== "video/webm") {
+          throw new Error("Video saa olla mp4 tai webm.");
+        }
+        if (source === "file") {
+          await assertMediaDuration(prepared, "video");
+        }
       }
       if (kind === "audio") {
         prepared = normalizeAudioFile(file);
@@ -307,9 +349,17 @@ function MediaControls({
         kind,
         mime: prepared.type.split(";")[0]?.trim().toLowerCase() ?? "",
       });
-      setStatus("Tiedosto tallennettu.");
+      setKept(null);
+      setStatus(
+        stoppedForSize
+          ? "Kuvaus pysäytettiin, koska video lähestyi 200 megatavun rajaa. Tähän asti kuvattu video on tallennettu."
+          : "Tiedosto tallennettu.",
+      );
     } catch (caught) {
       setStatus("");
+      if (kind === "video") {
+        setKept(prepared);
+      }
       setError(caught instanceof Error ? caught.message : "Lähetys epäonnistui.");
     } finally {
       setBusy(false);
@@ -329,6 +379,7 @@ function MediaControls({
     <div className="grid gap-4">
       <p className="text-sm text-muted">{mediaHint(kind)}</p>
       {media ? <ResponseMedia kind={kind} media={media} /> : null}
+      {kind === "video" && kept ? <KeptVideo file={kept} message={error} /> : null}
       {kind === "image" ? (
         <div className="flex flex-wrap gap-2">
           <button
@@ -357,32 +408,34 @@ function MediaControls({
           />
         </div>
       ) : kind === "video" ? (
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            className="h-11 rounded-md border border-line bg-card px-4 text-base"
-            onClick={() => cameraRef.current?.click()}
+        <VideoRecorder
+          disabled={busy}
+          onRecordingChange={(value) => {
+            setRecording(value);
+            if (value) {
+              setKept(null);
+              setError("");
+            }
+          }}
+          onFile={(file, info) => {
+            void send(file, "record", info.stoppedForSize);
+          }}
+        >
+          <label
+            className={`inline-flex h-11 items-center rounded-md border border-line bg-card px-4 text-base ${
+              busy || recording ? "pointer-events-none opacity-60" : "cursor-pointer"
+            }`}
           >
-            Kuvaa video
-          </button>
-          <label className="inline-flex h-11 cursor-pointer items-center rounded-md border border-line bg-card px-4 text-base">
             Valitse tiedosto
             <input
               type="file"
-              accept="video/mp4,video/webm"
+              accept="video/mp4,video/webm,.mp4,.webm"
+              disabled={busy || recording}
               className="sr-only"
               onChange={takeFile}
             />
           </label>
-          <input
-            ref={cameraRef}
-            type="file"
-            accept="video/mp4,video/webm"
-            capture="environment"
-            className="sr-only"
-            onChange={takeFile}
-          />
-        </div>
+        </VideoRecorder>
       ) : (
         <AudioControls
           disabled={busy}
@@ -392,7 +445,7 @@ function MediaControls({
           }}
         />
       )}
-      {error ? (
+      {error && !(kind === "video" && kept) ? (
         <p role="alert" className="text-sm text-danger">
           {error}
         </p>
@@ -407,37 +460,69 @@ export function DocumentControls({
   initialDocument,
   initialFiles = [],
   multiple = false,
+  onActivity,
 }: {
   assignmentId: string;
   initialDocument: ResponseDocument | null;
   initialFiles?: ResponseDocument[];
   multiple?: boolean;
+  onActivity?: (state: { busy: boolean; recording: boolean }) => void;
 }) {
   const [documentFile, setDocumentFile] = useState(initialDocument);
   const [files, setFiles] = useState(initialFiles);
+  const [kept, setKept] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const onActivityRef = useRef(onActivity);
+  onActivityRef.current = onActivity;
 
-  async function send(file: File) {
+  useEffect(() => {
+    onActivityRef.current?.({ busy, recording });
+  }, [busy, recording]);
+
+  async function send(file: File, stoppedForSize = false) {
+    const prepared = withVideoMime(file);
+    const video = videoMimeOf(prepared) !== "";
+    const limit = video ? MAX_VIDEO_BYTES : MAX_FILE_BYTES;
+    if (prepared.size > limit) {
+      setStatus("");
+      if (video) {
+        setKept(prepared);
+        setError(oversizedVideoMessage(prepared));
+      } else {
+        setKept(null);
+        setError("Tiedosto on liian suuri.");
+      }
+      return;
+    }
     setBusy(true);
     setError("");
     setStatus("Lähetetään…");
     try {
-      const id = await uploadResponse(assignmentId, "file", file);
+      const id = await uploadResponse(assignmentId, "file", prepared);
       const saved = {
         id,
-        name: file.name || "tiedosto",
-        mime: file.type.split(";")[0]?.trim().toLowerCase() || "application/octet-stream",
+        name: prepared.name || "tiedosto",
+        mime: prepared.type.split(";")[0]?.trim().toLowerCase() || "application/octet-stream",
       };
       if (multiple) {
         setFiles((current) => [...current, saved]);
       } else {
         setDocumentFile(saved);
       }
-      setStatus("Tiedosto tallennettu.");
+      setKept(null);
+      setStatus(
+        stoppedForSize
+          ? "Kuvaus pysäytettiin, koska video lähestyi 200 megatavun rajaa. Tähän asti kuvattu video on tallennettu."
+          : "Tiedosto tallennettu.",
+      );
     } catch (caught) {
       setStatus("");
+      if (video) {
+        setKept(prepared);
+      }
       setError(caught instanceof Error ? caught.message : "Lähetys epäonnistui.");
     } finally {
       setBusy(false);
@@ -448,8 +533,8 @@ export function DocumentControls({
     <div className="grid gap-2">
       <p className="text-sm text-muted">
         {multiple
-          ? "Voit lisätä niin monta tiedostoa kuin haluat. Yksi tiedosto enintään 25 Mt."
-          : "Voit myös lisätä vastauksen tiedostona laitteelta, esimerkiksi Word-asiakirjana. Enintään 25 Mt. Uusi tiedosto korvaa edellisen."}
+          ? "Voit lisätä niin monta tiedostoa kuin haluat. Video enintään 200 Mt, muu tiedosto enintään 25 Mt. Kuvaa video käyttää selaimen kameraa ja pysäyttää kuvauksen, ennen kuin koko ylittää rajan."
+          : "Voit myös lisätä vastauksen tiedostona laitteelta, esimerkiksi Word-asiakirjana. Video enintään 200 Mt, muu tiedosto enintään 25 Mt. Uusi tiedosto korvaa edellisen."}
       </p>
       {multiple
         ? files.map((file) => <ResponseFileView key={file.id} file={file} />)
@@ -459,27 +544,42 @@ export function DocumentControls({
           {documentFile.name}
         </a>
       ) : null}
-      <label
-        className={`inline-flex h-11 w-fit cursor-pointer items-center rounded-md border border-line bg-card px-4 text-base ${
-          busy ? "pointer-events-none opacity-60" : ""
-        }`}
+      <VideoRecorder
+        disabled={busy}
+        onRecordingChange={(value) => {
+          setRecording(value);
+          if (value) {
+            setKept(null);
+            setError("");
+          }
+        }}
+        onFile={(file, info) => {
+          void send(file, info.stoppedForSize);
+        }}
       >
-        Lisää tiedosto
-        <input
-          type="file"
-          className="sr-only"
-          disabled={busy}
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            if (!file) {
-              return;
-            }
-            void send(file);
-          }}
-        />
-      </label>
-      {error ? (
+        <label
+          className={`inline-flex h-11 items-center rounded-md border border-line bg-card px-4 text-base ${
+            busy || recording ? "pointer-events-none opacity-60" : "cursor-pointer"
+          }`}
+        >
+          Lisää tiedosto
+          <input
+            type="file"
+            className="sr-only"
+            disabled={busy || recording}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (!file) {
+                return;
+              }
+              void send(file);
+            }}
+          />
+        </label>
+      </VideoRecorder>
+      {kept ? <KeptVideo file={kept} message={error} /> : null}
+      {error && !kept ? (
         <p role="alert" className="text-sm text-danger">
           {error}
         </p>
@@ -494,7 +594,7 @@ function mediaHint(kind: "image" | "video" | "audio"): string {
     return "Yksi kuva, jpeg, png tai webp, enintään 8 Mt. Uusi kuva korvaa edellisen.";
   }
   if (kind === "video") {
-    return "Yksi video, mp4 tai webm, enintään 3 minuuttia ja 150 Mt. Puhelimessa Kuvaa video avaa kameran. Tietokoneella valitaan tallennettu tiedosto. Uusi video korvaa edellisen.";
+    return "Yksi video, mp4 tai webm, enintään 3 minuuttia ja 200 Mt. Kuvaa video käyttää selaimen kameraa ja pysäyttää kuvauksen, ennen kuin koko ylittää rajan. Valitse tiedosto käyttää jo tallennettua videota. Jos video on liian suuri, sen voi tallentaa puhelimeen. Uusi video korvaa edellisen.";
   }
   return "Yksi äänite, webm, mp4, mpeg, aac tai wav, enintään 3 minuuttia ja 25 Mt. Äänitä pyytää puhelimelta mikrofonin. Valitse tiedosto käyttää jo tallennettua äänitettä. Uusi äänite korvaa edellisen.";
 }
@@ -678,6 +778,21 @@ const AUDIO_EXTENSIONS: Record<string, string> = {
   aac: "audio/aac",
   wav: "audio/wav",
 };
+
+function normalizeVideoFile(file: File): File {
+  const mime = file.type.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (mime === "video/mp4" || mime === "video/webm") {
+    return file;
+  }
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".mp4")) {
+    return new File([file], file.name, { type: "video/mp4" });
+  }
+  if (name.endsWith(".webm")) {
+    return new File([file], file.name, { type: "video/webm" });
+  }
+  return file;
+}
 
 function normalizeAudioFile(file: File): File {
   const raw = file.type.split(";")[0]?.trim().toLowerCase() ?? "";

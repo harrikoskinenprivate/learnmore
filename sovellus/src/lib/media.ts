@@ -20,15 +20,18 @@ import {
   assignments,
 } from "@/lib/db/schema";
 import type { AssignmentMediaItem, CurrentUser, MediaKind } from "@/lib/types";
+import {
+  MAX_AUDIO_BYTES,
+  MAX_FILE_BYTES,
+  MAX_IMAGE_BYTES,
+  MAX_VIDEO_BYTES,
+  isVideoMime,
+} from "@/lib/media-limits";
 import { bufferHasHevc, fileHasHevc, transcodeToAvc } from "@/lib/video-compat";
 import { isUuid } from "@/lib/validation";
 
 export const MAX_IMAGES = 8;
-export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-export const MAX_VIDEO_BYTES = 150 * 1024 * 1024;
-export const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
-export const MAX_FILE_BYTES = 25 * 1024 * 1024;
-export const MAX_VIDEO_SECONDS = 180;
+export { MAX_AUDIO_BYTES, MAX_FILE_BYTES, MAX_IMAGE_BYTES, MAX_VIDEO_BYTES };
 
 const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const VIDEO_MIMES = new Set(["video/mp4", "video/webm"]);
@@ -62,12 +65,15 @@ function storeKind(): "local" | "gcs" {
 
 type StoredKind = MediaKind | "file";
 
-function maxBytes(kind: StoredKind): number {
+function maxBytes(kind: StoredKind, mime = ""): number {
   if (kind === "image") {
     return MAX_IMAGE_BYTES;
   }
-  if (kind === "audio" || kind === "file") {
-    return kind === "file" ? MAX_FILE_BYTES : MAX_AUDIO_BYTES;
+  if (kind === "audio") {
+    return MAX_AUDIO_BYTES;
+  }
+  if (kind === "file") {
+    return isVideoMime(mime) ? MAX_VIDEO_BYTES : MAX_FILE_BYTES;
   }
   return MAX_VIDEO_BYTES;
 }
@@ -249,7 +255,7 @@ function checkedKind(
       400,
     );
   }
-  if (!Number.isInteger(byteSize) || byteSize < 1 || byteSize > maxBytes(kind)) {
+  if (!Number.isInteger(byteSize) || byteSize < 1 || byteSize > maxBytes(kind, mime)) {
     throw new MediaError("Tiedosto on liian suuri.", 413);
   }
   return { kind, mime };
@@ -394,7 +400,7 @@ export async function saveLocalUpload(id: string, request: Request): Promise<voi
   }
 
   let total = 0;
-  const limit = maxBytes(row.kind);
+  const limit = maxBytes(row.kind, row.mime);
   const limiter = new Transform({
     transform(chunk: Buffer, _encoding, callback) {
       total += chunk.length;

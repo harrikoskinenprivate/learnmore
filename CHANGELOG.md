@@ -1,5 +1,9 @@
 # Muutosloki
 
+## 26.11.2026
+
+Oppilaan video kuvataan selaimessa. Kuvaus näyttää kameran kuvan, laskee tavut ja pysähtyy, kun koko lähestyy 200 megatavua tai kolme minuuttia tulee täyteen. Siihen asti kuvattu video säilyy ja tallentuu. Valittu videotiedosto tarkistetaan ennen lähetystä. Jos se on liian suuri tai lähetys epäonnistuu, sen voi tallentaa puhelimeen. Videon kokoraja on 200 Mt. Uuden tehtävän videotiedosto käyttää saman rajan. Muu liite pysyy 25 megatavussa. Ohjevideon raja on myös 200 Mt.
+
 ## 14.11.2026
 
 Oppilaan yläreunassa Etusivu on Kirjaudu ulos -painikkeen vasemmalla puolella. Se vie tehtävälistan päänäkymään. Tehtäväsivun paluulinkki vie samaan osoitteeseen.
